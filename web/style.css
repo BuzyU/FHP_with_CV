@@ -816,6 +816,50 @@ footer {
     }
 }
 
+@media (max-width: 480px) {
+    main {
+        padding: 0 0.5rem 2rem;
+    }
+
+    .hero-title {
+        font-size: 1.5rem;
+    }
+
+    .video-controls {
+        flex-direction: column;
+    }
+
+    .video-controls .btn {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .angles-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .angle-item {
+        border-right: none !important;
+    }
+
+    .angle-item:not(:last-child) {
+        border-bottom: 1px solid var(--glass-border);
+    }
+
+    .stat-value {
+        font-size: 0.95rem;
+    }
+
+    .score-row {
+        grid-template-columns: 65px 1fr 35px;
+        font-size: 0.65rem;
+    }
+
+    .formula-item {
+        font-size: 0.65rem;
+    }
+}
+
 /* Technical Analysis Panel */
 .card-tech {
     background: rgba(30, 32, 40, 0.7);
