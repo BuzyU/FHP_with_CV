@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FHP Detection — Real-time Posture Analysis</title>
+    <meta name="description"
+        content="AI-powered Forward Head Posture detection using Computer Vision and Graph Convolutional Networks. Real-time webcam analysis with biomechanical angle tracking.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦴</text></svg>">
+</head>
+
+<body>
+    <!-- Animated background -->
+    <div class="bg-grid"></div>
+    <div class="bg-glow bg-glow-1"></div>
+    <div class="bg-glow bg-glow-2"></div>
+
+    <!-- Header -->
+    <header id="header">
+        <div class="header-content">
+            <div class="logo">
+                <span class="logo-icon">🦴</span>
+                <div class="logo-text">
+                    <h1>FHP Detection</h1>
+                    <span class="logo-subtitle">AI-Powered Posture Analysis</span>
+                </div>
+            </div>
+            <div class="header-badges">
+                <span class="badge badge-tech">ST-GCN</span>
+                <span class="badge badge-tech">MediaPipe</span>
+                <span class="badge badge-tech">3D Pose</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main id="app">
+        <!-- Hero -->
+        <section class="hero" id="hero">
+            <h2 class="hero-title">
+                <span class="gradient-text">Forward Head Posture</span><br>
+                Detection & Correction
+            </h2>
+            <p class="hero-desc">
+                Real-time posture analysis using Computer Vision, 3D Pose Estimation,
+                and Graph Convolutional Networks — no wearables needed.
+            </p>
+            <button class="btn btn-primary btn-glow" id="startBtn" onclick="startDetection()">
+                <span class="btn-icon">📷</span>
+                Start Webcam Analysis
+            </button>
+        </section>
+
+        <!-- Detection Panel -->
+        <section class="detection-panel hidden" id="detectionPanel">
+            <div class="panel-grid">
+                <!-- Video Feed -->
+                <div class="card card-video">
+                    <div class="card-header">
+                        <span class="card-title">📹 Live Feed</span>
+                        <div class="status-dot" id="statusDot"></div>
+                    </div>
+                    <div class="video-container" id="videoContainer">
+                        <video id="webcam" autoplay playsinline muted style="display:none"></video>
+                        <canvas id="displayCanvas" class="display-canvas"></canvas>
+                        <div class="video-loading hidden" id="videoLoading">
+                            <div class="spinner"></div>
+                            <span>Connecting camera...</span>
+                        </div>
+                    </div>
+                    <div class="video-controls">
+                        <button class="btn btn-sm btn-outline" onclick="toggleCamera()">
+                            🔄 Switch Camera
+                        </button>
+                        <button class="btn btn-sm btn-danger" onclick="stopDetection()">
+                            ⏹ Stop
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Results Panel -->
+                <div class="results-column">
+                    <!-- Classification Card -->
+                    <div class="card card-result" id="resultCard">
+                        <div class="card-header">
+                            <span class="card-title">🎯 Classification</span>
+                        </div>
+                        <div class="result-display" id="resultDisplay">
+                            <div class="result-class" id="resultClass">—</div>
+                            <div class="confidence-bar-container">
+                                <div class="confidence-label">Confidence</div>
+                                <div class="confidence-track">
+                                    <div class="confidence-fill" id="confidenceFill"></div>
+                                </div>
+                                <div class="confidence-value" id="confidenceValue">—</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Biomechanical Angles -->
+                    <div class="card card-angles">
+                        <div class="card-header">
+                            <span class="card-title">📐 Biomechanics</span>
+                        </div>
+                        <div class="angles-grid" id="anglesGrid">
+                            <div class="angle-item">
+                                <span class="angle-label">CVA Proxy</span>
+                                <span class="angle-value" id="angleCVA">—</span>
+                            </div>
+                            <div class="angle-item">
+                                <span class="angle-label">Shoulder Round</span>
+                                <span class="angle-value" id="angleShoulder">—</span>
+                            </div>
+                            <div class="angle-item">
+                                <span class="angle-label">Head Tilt</span>
+                                <span class="angle-value" id="angleHeadTilt">—</span>
+                            </div>
+                            <div class="angle-item">
+                                <span class="angle-label">Neck Flexion</span>
+                                <span class="angle-value" id="angleNeckFlex">—</span>
+                            </div>
+                            <div class="angle-item">
+                                <span class="angle-label">Head Fwd</span>
+                                <span class="angle-value" id="angleHeadFwd">—</span>
+                            </div>
+                            <div class="angle-item">
+                                <span class="angle-label">Shoulder Sym</span>
+                                <span class="angle-value" id="angleSymmetry">—</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Session Stats -->
+                    <div class="card card-stats">
+                        <div class="card-header">
+                            <span class="card-title">📊 Session</span>
+                            <button class="btn btn-xs btn-ghost" onclick="resetSession()">Reset</button>
+                        </div>
+                        <div class="stats-grid">
+                            <div class="stat-item">
+                                <span class="stat-value" id="statTime">00:00</span>
+                                <span class="stat-label">Duration</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-value" id="statFPS">0</span>
+                                <span class="stat-label">FPS</span>
+                            </div>
+                            <div class="stat-item stat-normal">
+                                <span class="stat-value" id="statNormal">0%</span>
+                                <span class="stat-label">Normal</span>
+                            </div>
+                            <div class="stat-item stat-fhp">
+                                <span class="stat-value" id="statFHP">0%</span>
+                                <span class="stat-label">FHP</span>
+                            </div>
+                        </div>
+                        <div class="posture-timeline" id="postureTimeline"></div>
+                    </div>
+
+                    <!-- Technical Analysis -->
+                    <div class="card card-tech">
+                        <div class="card-header">
+                            <span class="card-title">🔬 Technical Analysis</span>
+                            <button class="btn btn-xs btn-ghost" id="techToggle" onclick="toggleTechPanel()">▼</button>
+                        </div>
+                        <div class="tech-content" id="techContent">
+                            <!-- Scoring Breakdown -->
+                            <div class="tech-section">
+                                <div class="tech-label">FHP Score Breakdown</div>
+                                <div class="score-bars" id="scoreBreakdown">
+                                    <div class="score-row">
+                                        <span class="score-name">Neck Angle</span>
+                                        <div class="score-bar-track">
+                                            <div class="score-bar-fill" id="scoreNeck"></div>
+                                        </div>
+                                        <span class="score-val" id="scoreNeckVal">0</span>
+                                    </div>
+                                    <div class="score-row">
+                                        <span class="score-name">Ear Height</span>
+                                        <div class="score-bar-track">
+                                            <div class="score-bar-fill" id="scoreEar"></div>
+                                        </div>
+                                        <span class="score-val" id="scoreEarVal">0</span>
+                                    </div>
+                                    <div class="score-row">
+                                        <span class="score-name">CVA Angle</span>
+                                        <div class="score-bar-track">
+                                            <div class="score-bar-fill" id="scoreCVA"></div>
+                                        </div>
+                                        <span class="score-val" id="scoreCVAVal">0</span>
+                                    </div>
+                                    <div class="score-row">
+                                        <span class="score-name">Nose Drop</span>
+                                        <div class="score-bar-track">
+                                            <div class="score-bar-fill" id="scoreNose"></div>
+                                        </div>
+                                        <span class="score-val" id="scoreNoseVal">0</span>
+                                    </div>
+                                    <div class="score-row">
+                                        <span class="score-name">Shoulder Fwd</span>
+                                        <div class="score-bar-track">
+                                            <div class="score-bar-fill" id="scoreShoulder"></div>
+                                        </div>
+                                        <span class="score-val" id="scoreShoulderVal">0</span>
+                                    </div>
+                                    <div class="score-row score-total">
+                                        <span class="score-name">Total Score</span>
+                                        <div class="score-bar-track">
+                                            <div class="score-bar-fill score-bar-total" id="scoreTotal"></div>
+                                        </div>
+                                        <span class="score-val" id="scoreTotalVal">0</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Filters & Formulas -->
+                            <div class="tech-section">
+                                <div class="tech-label">Filters & Formulas</div>
+                                <div class="formula-list">
+                                    <div class="formula-item">
+                                        <span class="formula-tag">EMA</span>
+                                        <code>S<sub>t</sub> = α·x<sub>t</sub> + (1−α)·S<sub>t−1</sub></code>
+                                        <span class="formula-param">α = 0.3</span>
+                                    </div>
+                                    <div class="formula-item">
+                                        <span class="formula-tag">CVA</span>
+                                        <code>θ = arccos(v̂<sub>ear→sh</sub> · ĵ)</code>
+                                        <span class="formula-param">thresh &gt; 20°</span>
+                                    </div>
+                                    <div class="formula-item">
+                                        <span class="formula-tag">Neck</span>
+                                        <code>θ = arccos(v̂<sub>hip→sh</sub> · v̂<sub>sh→ear</sub>)</code>
+                                        <span class="formula-param">thresh &gt; 15°</span>
+                                    </div>
+                                    <div class="formula-item">
+                                        <span class="formula-tag">Class</span>
+                                        <code>FHP if smoothed_score &gt; 20%</code>
+                                        <span class="formula-param" id="smoothedVal">—</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Pipeline -->
+                            <div class="tech-section">
+                                <div class="tech-label">Pipeline</div>
+                                <div class="pipeline-flow">
+                                    <span class="pipe-step">📷 Frame</span>
+                                    <span class="pipe-arrow">→</span>
+                                    <span class="pipe-step">🦴 MediaPipe</span>
+                                    <span class="pipe-arrow">→</span>
+                                    <span class="pipe-step">📐 3D Lift</span>
+                                    <span class="pipe-arrow">→</span>
+                                    <span class="pipe-step">🧮 Bio Score</span>
+                                    <span class="pipe-arrow">→</span>
+                                    <span class="pipe-step">🎯 EMA</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Info Cards -->
+        <section class="info-section" id="infoSection">
+            <h3 class="section-title">How It Works</h3>
+            <div class="info-grid">
+                <div class="info-card">
+                    <div class="info-icon">📷</div>
+                    <h4>1. Capture</h4>
+                    <p>Your webcam captures video frames in real-time. All processing happens locally — no images are
+                        stored.</p>
+                </div>
+                <div class="info-card">
+                    <div class="info-icon">🦴</div>
+                    <h4>2. Pose Estimation</h4>
+                    <p>MediaPipe detects 17 body joints in 2D, then VideoPose3D lifts them to 3D coordinates.</p>
+                </div>
+                <div class="info-card">
+                    <div class="info-icon">🧠</div>
+                    <h4>3. GCN Analysis</h4>
+                    <p>A Graph Convolutional Network analyzes the 3D skeleton structure and temporal dynamics.</p>
+                </div>
+                <div class="info-card">
+                    <div class="info-icon">✅</div>
+                    <h4>4. Classification</h4>
+                    <p>The model classifies your posture as Normal or FHP with confidence scores and biomechanical
+                        angles.</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Alert Overlay -->
+    <div class="alert-overlay hidden" id="alertOverlay">
+        <div class="alert-content">
+            <div class="alert-icon">⚠️</div>
+            <div class="alert-text">Correct Your Posture!</div>
+            <div class="alert-subtext">Your head is tilting forward</div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer>
+        <div class="footer-content">
+            <span>FHP Detection System v1.0</span>
+            <span class="footer-sep">•</span>
+            <span>Powered by ST-GCN + MediaPipe + VideoPose3D</span>
+        </div>
+    </footer>
+
+    <script src="/static/app.js"></script>
+</body>
+
+</html>

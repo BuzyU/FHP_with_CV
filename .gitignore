@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+venv/
+env/
+.env/
+
+# ML artifacts
+*.pth
+*.onnx
+*.tflite
+*.pt
+data/raw/
+data/processed/
+data/splits/
+models/checkpoints/
+models/exported/*.pth
+logs/
+*.h5
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Docker
+*.log
+
+# Environment
+.env
+.env.local

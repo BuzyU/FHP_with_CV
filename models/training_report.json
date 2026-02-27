@@ -1,0 +1,12 @@
+{
+  "timestamp": "2026-02-27T04:16:15.998310",
+  "epochs_trained": 28,
+  "best_val_f1": 0.9751,
+  "test_accuracy": 0.97,
+  "test_f1": 0.97,
+  "test_precision": 0.9732,
+  "test_recall": 0.9668,
+  "model_params": 2557891,
+  "device": "cpu",
+  "data_dir": "D:\\Projects\\Computer_vision\\data\\real_splits"
+}

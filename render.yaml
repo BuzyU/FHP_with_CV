@@ -1,0 +1,26 @@
+# Render Blueprint — Deployment Configuration
+# https://render.com/docs/blueprint-spec
+
+services:
+  # FastAPI Backend
+  - type: web
+    name: fhp-detection-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    region: oregon
+    plan: free
+    envVars:
+      - key: PORT
+        value: "8000"
+      - key: CONFIG_PATH
+        value: "config.yaml"
+      - key: MODEL_PATH
+        value: "models/exported/stgcn_fhp.pth"
+    healthCheckPath: /health
+    buildFilter:
+      paths:
+        - src/**
+        - api/**
+        - config.yaml
+        - Dockerfile
+        - requirements-api.txt

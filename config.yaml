@@ -1,0 +1,119 @@
+# ============================================
+# FHP Detection System — Master Configuration
+# ============================================
+
+project:
+  name: "FHP-Detection-System"
+  version: "1.0.0"
+  description: "Real-time Forward Head Posture Detection using CV + GCN"
+
+# --- Pose Estimation ---
+pose_estimation:
+  backend: "mediapipe"            # "mediapipe" or "rtmpose"
+  model_complexity: 2             # 0=lite, 1=full, 2=heavy
+  min_detection_confidence: 0.7
+  min_tracking_confidence: 0.7
+  num_joints: 17                  # COCO format
+  upper_body_joints: 13           # Subset used for FHP
+
+# --- 3D Lifting (VideoPose3D) ---
+lifting:
+  model_path: "models/exported/videopose3d_pretrained.pth"
+  receptive_field: 1              # 1 = single-frame, 243 = temporal
+  input_joints: 17
+  output_dims: 3
+
+# --- Skeleton Graph ---
+skeleton:
+  format: "h36m"                  # Human3.6M format
+  upper_body_joint_names:
+    - "Pelvis"        # 0
+    - "R_Hip"         # 1
+    - "L_Hip"         # 2
+    - "Spine"         # 3
+    - "Chest"         # 4
+    - "Neck"          # 5
+    - "Head"          # 6
+    - "L_Shoulder"    # 7
+    - "L_Elbow"       # 8
+    - "L_Wrist"       # 9
+    - "R_Shoulder"    # 10
+    - "R_Elbow"       # 11
+    - "R_Wrist"       # 12
+  edges:
+    - [0, 1]    # pelvis → r_hip
+    - [0, 2]    # pelvis → l_hip
+    - [0, 3]    # pelvis → spine
+    - [3, 4]    # spine → chest
+    - [4, 5]    # chest → neck
+    - [5, 6]    # neck → head
+    - [5, 7]    # neck → l_shoulder
+    - [7, 8]    # l_shoulder → l_elbow
+    - [8, 9]    # l_elbow → l_wrist
+    - [5, 10]   # neck → r_shoulder
+    - [10, 11]  # r_shoulder → r_elbow
+    - [11, 12]  # r_elbow → r_wrist
+
+# --- GCN Model ---
+model:
+  type: "stgcn"
+  in_channels: 3                  # x, y, z
+  num_joints: 13
+  num_frames: 30                  # temporal window
+  gcn_layers: 3
+  gcn_hidden: [64, 128, 64]
+  temporal_kernel_size: 9
+  bio_feature_dim: 6              # CVA proxy, shoulder rounding, head displacement, head tilt, neck flexion, shoulder symmetry
+  num_classes: 2                  # Normal / FHP
+  dropout: 0.5
+
+# --- Training ---
+training:
+  batch_size: 64
+  epochs: 200
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  scheduler: "cosine"             # "cosine" or "step"
+  early_stopping_patience: 15
+  label_smoothing: 0.1
+  class_weights: "balanced"       # "balanced", "none", or [w0, w1]
+  train_split: 0.70
+  val_split: 0.15
+  test_split: 0.15
+  seed: 42
+
+# --- Data Augmentation ---
+augmentation:
+  enabled: true
+  rotation_range: 15.0            # ±15° per axis
+  noise_std: 0.02                 # Gaussian noise σ
+  mirror_prob: 0.5                # left-right flip
+  temporal_jitter: 3              # random frame offset
+
+# --- Biomechanical Thresholds (for DISPLAY only, NOT classification) ---
+biomechanics:
+  normal_cva_range: [49, 56]      # degrees (reference only)
+  fhp_warning_cva: 46             # degrees (reference only)
+  fhp_severe_cva: 40              # degrees (reference only)
+
+# --- Real-time Application ---
+realtime:
+  camera_id: 0
+  fps_target: 30
+  window_width: 1280
+  window_height: 720
+  alert_cooldown_seconds: 10
+  alert_sound_path: "assets/alert.wav"
+  show_skeleton: true
+  show_angles: true
+  show_fps: true
+  confidence_threshold: 0.6       # min model confidence for alert
+
+# --- Paths ---
+paths:
+  data_raw: "data/raw"
+  data_processed: "data/processed"
+  data_splits: "data/splits"
+  model_checkpoints: "models/checkpoints"
+  model_exported: "models/exported"
+  logs: "logs"
