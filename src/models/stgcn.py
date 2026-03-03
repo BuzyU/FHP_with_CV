@@ -251,25 +251,20 @@ class STGCN(nn.Module):
         """
         B, T, N, C = joints.shape
 
-        # --- Spatial GCN: process each frame ---
-        spatial_outputs = []
-        for t in range(T):
-            x = joints[:, t, :, :]  # (B, N, C)
+        # --- Spatial GCN: batch all frames for GPU parallelism ---
+        # Merge batch and time dims so GCN processes all frames at once
+        x = joints.reshape(B * T, N, C)  # (B*T, N, C)
 
-            for gcn_layer in self.spatial_gcn:
-                x = gcn_layer(x, adj)  # (B, N, gcn_out)
+        for gcn_layer in self.spatial_gcn:
+            x = gcn_layer(x, adj)  # (B*T, N, gcn_out)
 
-            # Apply joint attention
-            attn = self.joint_attention(x)  # (B, N, 1)
-            x = x * attn
+        # Apply joint attention
+        attn = self.joint_attention(x)  # (B*T, N, 1)
+        x = x * attn
 
-            # Flatten joints: (B, N * gcn_out)
-            x = x.reshape(B, -1)
-            spatial_outputs.append(x)
-
-        # --- Temporal: stack frames and convolve ---
-        # (B, N*gcn_out, T)
-        temporal_input = torch.stack(spatial_outputs, dim=2)
+        # Flatten joints and reshape back to (B, feat, T) for temporal conv
+        x = x.reshape(B * T, -1)  # (B*T, N*gcn_out)
+        temporal_input = x.reshape(B, T, -1).permute(0, 2, 1)  # (B, N*gcn_out, T)
         temporal_out = self.temporal_conv(temporal_input)  # (B, 128, T)
 
         # Global average pooling over time
@@ -470,4 +465,4 @@ if __name__ == "__main__":
     print(f"  Input:  joints {sf_joints.shape}, bio {sf_bio.shape}")
     print(f"  Output: logits {sf_logits.shape}")
 
-    print("\n✅ All model tests passed!")
+    print("\n[OK] All model tests passed!")

@@ -51,15 +51,16 @@ class PoseEstimator:
                     min_detection_confidence=det_conf,
                     min_tracking_confidence=track_conf,
                 )
-                print(f"✅ MediaPipe Pose initialized (complexity={complexity})")
+                print(f"[OK] MediaPipe Pose initialized (complexity={complexity})")
             except ImportError:
-                print("⚠️  MediaPipe not installed. Run: pip install mediapipe")
+                print("[WARN] MediaPipe not installed. Run: pip install mediapipe")
                 self.model = None
 
         elif self.backend == "rtmpose":
             # RTMPose would require mmpose setup
-            print("⚠️  RTMPose backend not yet implemented. Using MediaPipe fallback.")
-            self._init_model("mediapipe", complexity, det_conf, track_conf)
+            print("[WARN] RTMPose backend not yet implemented. Using MediaPipe fallback.")
+            self.backend = "mediapipe"
+            self._init_model(complexity, det_conf, track_conf)
 
     def estimate_2d(
         self,
@@ -265,9 +266,9 @@ class BatchPoseEstimator:
             "output_shape": keypoints_arr.shape,
         }
 
-        print(f"✅ Processed {summary['successful']}/{summary['total_images']} images")
+        print(f"[OK] Processed {summary['successful']}/{summary['total_images']} images")
         if failed:
-            print(f"⚠️  Failed: {len(failed)} images")
+            print(f"[WARN] Failed: {len(failed)} images")
 
         return summary
 

@@ -2,7 +2,7 @@
 # https://render.com/docs/blueprint-spec
 
 services:
-  # FastAPI Backend
+  # FastAPI Backend + Frontend (single service)
   - type: web
     name: fhp-detection-api
     runtime: docker
@@ -10,17 +10,20 @@ services:
     region: oregon
     plan: free
     envVars:
-      - key: PORT
-        value: "8000"
       - key: CONFIG_PATH
         value: "config.yaml"
       - key: MODEL_PATH
         value: "models/exported/stgcn_fhp.pth"
+      - key: PYTHON_UNBUFFERED
+        value: "1"
     healthCheckPath: /health
     buildFilter:
       paths:
         - src/**
         - api/**
+        - web/**
+        - models/exported/**
+        - models/pose_landmarker_lite.task
         - config.yaml
         - Dockerfile
         - requirements-api.txt

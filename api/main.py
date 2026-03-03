@@ -17,8 +17,9 @@ import os
 import sys
 import time
 import base64
-import io
 import uuid
+import math
+import traceback
 import numpy as np
 import cv2
 import torch
@@ -28,9 +29,70 @@ from typing import Dict, Optional
 from collections import deque
 from contextlib import asynccontextmanager
 
+
+# ============================================================
+# One Euro Filter  (per-landmark temporal smoothing)
+# ============================================================
+
+class OneEuroFilter:
+    """
+    One Euro Filter -- reduces jitter while keeping latency low.
+
+    Applies independently to each dimension of each landmark.
+    When the signal moves slowly the filter smooths aggressively (low cutoff);
+    when it moves fast it lets the signal through (high cutoff).
+
+    Reference: Casiez et al., "1 Euro Filter", CHI 2012.
+    """
+
+    def __init__(self, freq: float = 30.0, min_cutoff: float = 1.0,
+                 beta: float = 0.007, d_cutoff: float = 1.0):
+        self.freq = freq
+        self.min_cutoff = min_cutoff
+        self.beta = beta
+        self.d_cutoff = d_cutoff
+        self._x_prev: Optional[np.ndarray] = None
+        self._dx_prev: Optional[np.ndarray] = None
+        self._t_prev: Optional[float] = None
+
+    @staticmethod
+    def _smoothing_factor(te: float, cutoff: float) -> float:
+        r = 2.0 * math.pi * cutoff * te
+        return r / (r + 1.0)
+
+    def __call__(self, x: np.ndarray, t: Optional[float] = None) -> np.ndarray:
+        if self._x_prev is None:
+            self._x_prev = x.copy()
+            self._dx_prev = np.zeros_like(x)
+            self._t_prev = t if t is not None else 0.0
+            return x.copy()
+
+        if t is None:
+            te = 1.0 / self.freq
+        else:
+            te = max(t - self._t_prev, 1e-6)
+            self._t_prev = t
+
+        # Derivative (speed)
+        a_d = self._smoothing_factor(te, self.d_cutoff)
+        dx = (x - self._x_prev) / te
+        dx_hat = a_d * dx + (1.0 - a_d) * self._dx_prev
+
+        # Adaptive cutoff
+        cutoff = self.min_cutoff + self.beta * np.abs(dx_hat)
+
+        # Per-element smoothing factor (vectorized — no Python loop)
+        r = 2.0 * math.pi * cutoff * te
+        a = r / (r + 1.0)
+        x_hat = a * x + (1.0 - a) * self._x_prev
+
+        self._x_prev = x_hat
+        self._dx_prev = dx_hat
+        return x_hat
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -39,7 +101,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.utils.skeleton import get_upper_body_adjacency, extract_upper_body, mediapipe_to_h36m
-from src.utils.angles import compute_all_biomechanical_features, features_to_vector, classify_cva_severity
+from src.utils.angles import compute_all_biomechanical_features, features_to_vector
 from src.data.preprocessing import normalize_3d_pose
 from src.models.stgcn import create_model
 
@@ -54,6 +116,13 @@ device = None
 pose_model = None
 lifter = None
 sessions: Dict[str, deque] = {}
+session_timestamps: Dict[str, float] = {}  # track last access time per session
+session_filters: Dict[str, OneEuroFilter] = {}  # per-session One Euro filters
+session_frame_buffers: Dict[str, dict] = {}  # per-session frame buffers for ST-GCN
+_ml_pred_history: Dict[str, deque] = {}  # per-session ML prediction history (stuck detection)
+MAX_SESSIONS = 1000
+SESSION_TTL_SECONDS = 600  # 10 minute timeout
+NUM_FRAMES = 30  # temporal window for ST-GCN
 config = {}
 
 
@@ -66,11 +135,14 @@ async def lifespan(app: FastAPI):
     """Load model and resources on startup."""
     global model, adj_tensor, device, pose_model, lifter, config
 
-    print("🚀 Starting FHP Detection API...")
+    print("[START] Starting FHP Detection API...")
 
     # Load config
-    config_path = os.environ.get("CONFIG_PATH", str(PROJECT_ROOT / "config.yaml"))
-    if Path(config_path).exists():
+    config_path_raw = os.environ.get("CONFIG_PATH", str(PROJECT_ROOT / "config.yaml"))
+    config_path = Path(config_path_raw)
+    if not config_path.is_absolute():
+        config_path = PROJECT_ROOT / config_path
+    if config_path.exists():
         with open(config_path) as f:
             config = yaml.safe_load(f)
     else:
@@ -95,13 +167,16 @@ async def lifespan(app: FastAPI):
     model = create_model(model_config)
 
     # Try to load trained weights
-    model_path = os.environ.get("MODEL_PATH",
+    model_path_raw = os.environ.get("MODEL_PATH",
         str(PROJECT_ROOT / "models" / "exported" / "stgcn_fhp.pth"))
-    if Path(model_path).exists():
-        model.load_state_dict(torch.load(model_path, map_location=device, weights_only=False))
-        print(f"   ✅ Loaded model: {model_path}")
+    model_path = Path(model_path_raw)
+    if not model_path.is_absolute():
+        model_path = PROJECT_ROOT / model_path
+    if model_path.exists():
+        model.load_state_dict(torch.load(str(model_path), map_location=device, weights_only=False))
+        print(f"   [OK] Loaded model: {model_path}")
     else:
-        print(f"   ⚠️  No trained model found — running in DEMO mode")
+        print(f"   [WARN] No trained model found at {model_path} -- running in DEMO mode")
 
     model.to(device)
     model.eval()
@@ -122,7 +197,7 @@ async def lifespan(app: FastAPI):
                 min_detection_confidence=0.5,
             )
             _mp_api_version = "legacy"
-            print("   ✅ MediaPipe loaded (solutions API)")
+            print("   [OK] MediaPipe loaded (solutions API)")
         elif hasattr(mp, 'tasks'):
             # New tasks API (Python 3.13+)
             from mediapipe.tasks import python as mp_python
@@ -134,9 +209,9 @@ async def lifespan(app: FastAPI):
             if not model_asset.exists():
                 model_asset.parent.mkdir(parents=True, exist_ok=True)
                 url = "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/latest/pose_landmarker_lite.task"
-                print(f"   📥 Downloading pose landmarker model...")
+                print(f"   [DL] Downloading pose landmarker model...")
                 urllib.request.urlretrieve(url, str(model_asset))
-                print(f"   ✅ Downloaded to {model_asset}")
+                print(f"   [OK] Downloaded to {model_asset}")
 
             base_options = mp_python.BaseOptions(
                 model_asset_path=str(model_asset)
@@ -149,12 +224,12 @@ async def lifespan(app: FastAPI):
             )
             pose_model = mp_vision.PoseLandmarker.create_from_options(options)
             _mp_api_version = "tasks"
-            print("   ✅ MediaPipe loaded (tasks API)")
+            print("   [OK] MediaPipe loaded (tasks API)")
         else:
-            print("   ⚠️  MediaPipe found but no compatible API")
+            print("   [WARN] MediaPipe found but no compatible API")
             pose_model = None
     except Exception as e:
-        print(f"   ⚠️  MediaPipe error: {e}")
+        print(f"   [WARN] MediaPipe error: {e}")
         pose_model = None
 
     # Store API version for detection logic
@@ -164,21 +239,21 @@ async def lifespan(app: FastAPI):
     try:
         from src.models.videopose3d import VideoPose3DLifter
         lifter = VideoPose3DLifter(device=str(device))
-        print("   ✅ VideoPose3D loaded")
+        print("   [OK] VideoPose3D loaded")
     except Exception as e:
-        print(f"   ⚠️  VideoPose3D: {e}")
+        print(f"   [WARN] VideoPose3D: {e}")
         lifter = None
 
     total_params = sum(p.numel() for p in model.parameters())
     print(f"   Model params: {total_params:,}")
-    print("   🟢 API ready!")
+    print("   [READY] API ready!")
 
     yield
 
     # Cleanup
     if pose_model and hasattr(pose_model, 'close'):
         pose_model.close()
-    print("🔴 API shutdown")
+    print("[STOP] API shutdown")
 
 
 def _default_config():
@@ -211,13 +286,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Serve frontend static files
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-
 WEB_DIR = PROJECT_ROOT / "web"
-if WEB_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(WEB_DIR)), name="static")
 
 
 # ============================================================
@@ -307,13 +376,6 @@ async def detect(request: DetectRequest):
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     rgb = np.ascontiguousarray(rgb)  # Required for MediaPipe tasks API
 
-    # Debug: log first few frames
-    _debug_count = getattr(app.state, '_debug_frame_count', 0)
-    if _debug_count < 3:
-        print(f"   [DEBUG] Frame shape: {frame.shape}, dtype: {frame.dtype}")
-        print(f"   [DEBUG] RGB shape: {rgb.shape}, contiguous: {rgb.flags['C_CONTIGUOUS']}")
-        app.state._debug_frame_count = _debug_count + 1
-
     raw_landmarks = None
     mp_api = getattr(app.state, 'mp_api_version', None)
 
@@ -330,13 +392,6 @@ async def detect(request: DetectRequest):
             import mediapipe as mp
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
             results = pose_model.detect(mp_image)
-
-            if _debug_count < 3:
-                has_lm = bool(results.pose_landmarks and len(results.pose_landmarks) > 0)
-                print(f"   [DEBUG] Tasks API result: has_landmarks={has_lm}")
-                if has_lm:
-                    print(f"   [DEBUG] Num landmarks: {len(results.pose_landmarks[0])}")
-
             if results.pose_landmarks and len(results.pose_landmarks) > 0:
                 landmarks = results.pose_landmarks[0]
                 raw_landmarks = np.array([
@@ -344,7 +399,6 @@ async def detect(request: DetectRequest):
                     for lm in landmarks
                 ], dtype=np.float32)
     except Exception as e:
-        import traceback
         print(f"Pose detection error: {e}")
         traceback.print_exc()
 
@@ -353,6 +407,23 @@ async def detect(request: DetectRequest):
             detected=False,
             inference_time_ms=(time.time() - start) * 1000,
         )
+
+    # --- One Euro Filter: smooth raw landmarks per session ---
+    session_id = request.session_id or str(uuid.uuid4())
+    now_t = time.time()
+    if session_id not in session_filters:
+        # Evict stale filters along with sessions
+        if len(session_filters) >= MAX_SESSIONS:
+            stale = [sid for sid, ts in session_timestamps.items()
+                     if now_t - ts > SESSION_TTL_SECONDS]
+            for sid in stale:
+                session_filters.pop(sid, None)
+        session_filters[session_id] = OneEuroFilter(
+            freq=15.0, min_cutoff=0.8, beta=0.004, d_cutoff=1.0
+        )
+    raw_landmarks[:, :3] = session_filters[session_id](
+        raw_landmarks[:, :3], t=now_t
+    )
 
     # Convert to H36M format for the model
     h36m_3d = mediapipe_to_h36m(raw_landmarks)
@@ -385,36 +456,51 @@ async def detect(request: DetectRequest):
     bio_features = compute_all_biomechanical_features(normalized)
     bio_vec = features_to_vector(bio_features)
 
-    # 4. ST-GCN model inference (trained model, not hardcoded)
-    ml_fhp_prob = 0.5  # default
-    if model is not None:
-        try:
-            adj = get_upper_body_adjacency(normalize=True)
-            adj_t = torch.tensor(adj, dtype=torch.float32, device=device)
-            # Single frame → replicate to fill temporal window
-            j_np = normalized[np.newaxis, np.newaxis, :, :]  # (1, 1, 13, 3)
-            j_np = np.repeat(j_np, 30, axis=1)  # (1, 30, 13, 3)
-            f_np = bio_vec[np.newaxis, np.newaxis, :]  # (1, 1, 6)
-            f_np = np.repeat(f_np, 30, axis=1)  # (1, 30, 6)
+    # 4. ST-GCN model inference with temporal frame buffer
+    ml_fhp_prob = 0.5  # default until buffer is full
 
-            j_t = torch.tensor(j_np, dtype=torch.float32, device=device)
-            f_t = torch.tensor(f_np, dtype=torch.float32, device=device)
+    if model is not None and adj_tensor is not None:
+        # Maintain per-session frame buffer
+        if session_id not in session_frame_buffers:
+            if len(session_frame_buffers) >= MAX_SESSIONS:
+                stale = [sid for sid, ts in session_timestamps.items()
+                         if now_t - ts > SESSION_TTL_SECONDS]
+                for sid in stale:
+                    session_frame_buffers.pop(sid, None)
+                    _ml_pred_history.pop(sid, None)
+            session_frame_buffers[session_id] = {
+                "joints": deque(maxlen=NUM_FRAMES),
+                "features": deque(maxlen=NUM_FRAMES),
+            }
 
-            with torch.no_grad():
-                logits = model(j_t, adj_t, f_t)
-                probs = torch.softmax(logits, dim=1)
-                ml_fhp_prob = float(probs[0, 1])
-        except Exception as e:
-            _debug_cls = getattr(app.state, '_debug_cls_count', 0)
-            if _debug_cls < 3:
-                print(f"   [ML] model error: {e}")
-                app.state._debug_cls_count = _debug_cls + 1
+        buf = session_frame_buffers[session_id]
+        buf["joints"].append(normalized)    # (13, 3)
+        buf["features"].append(bio_vec)     # (6,)
+
+        if len(buf["joints"]) == NUM_FRAMES:
+            try:
+                j_tensor = torch.tensor(
+                    np.array(list(buf["joints"]), dtype=np.float32),
+                    device=device,
+                ).unsqueeze(0)  # (1, T, 13, 3)
+                f_tensor = torch.tensor(
+                    np.array(list(buf["features"]), dtype=np.float32),
+                    device=device,
+                ).unsqueeze(0)  # (1, T, 6)
+
+                with torch.no_grad():
+                    logits = model(j_tensor, adj_tensor, f_tensor)  # (1, 2)
+                    probs = torch.softmax(logits, dim=1)
+                    ml_fhp_prob = float(probs[0, 1])  # P(FHP)
+            except Exception as e:
+                # Fallback to placeholder on any model error
+                if getattr(app.state, '_debug_cls_count', 0) % 60 == 0:
+                    print(f"   [WARN] ST-GCN inference error: {e}")
+                ml_fhp_prob = 0.5
 
     # 5. ANGLE-AGNOSTIC FHP detection using full 3D vectors
     # Works from front, side, or any diagonal camera angle
     # Uses 3D displacement magnitude + view-angle auto-detection
-
-    session_id = request.session_id or str(uuid.uuid4())
 
     # --- Extract key landmarks (MediaPipe 33-joint, normalized 0-1 coords) ---
     nose = raw_landmarks[0, :3]
@@ -463,7 +549,6 @@ async def detect(request: DetectRequest):
     # 4. Nose position relative to ears (chin forward indicator)
     nose_to_ear_vec = nose - mid_ear
     nose_drop = float(nose_to_ear_vec[1]) / torso_len  # positive = nose below ears
-    nose_forward = float(np.sqrt(nose_to_ear_vec[0]**2 + nose_to_ear_vec[2]**2)) / torso_len
 
     # 5. Neck angle: angle between (hip→shoulder) and (shoulder→ear) vectors in 3D
     hip_to_shoulder = mid_shoulder - mid_hip
@@ -499,13 +584,15 @@ async def detect(request: DetectRequest):
     shoulder_sym = abs(l_shoulder[1] - r_shoulder[1]) * 100
 
     # === FHP SCORE (0-100, higher = worse) ===
-    # Thresholds calibrated from actual MediaPipe output on real webcam data
+    # Thresholds calibrated for real webcam data.
+    # Normal posture: neck_angle ~15-28, cva ~15-30, ear_height ~0.25-0.45
+    # FHP posture:    neck_angle >35,    cva >40,    ear_height <0.20
     
-    s_neck = min((neck_angle - 15) * 2.0, 35) if neck_angle > 15 else 0.0
-    s_ear = min((0.40 - ear_height_ratio) * 120, 25) if ear_height_ratio < 0.40 else 0.0
-    s_cva = min((cva_angle - 20) * 1.5, 25) if cva_angle > 20 else 0.0
-    s_nose = min((nose_drop - 0.04) * 150, 10) if nose_drop > 0.04 else 0.0
-    s_sh = min((shoulder_fwd_3d - 0.15) * 30, 15) if shoulder_fwd_3d > 0.15 else 0.0
+    s_neck = min((neck_angle - 28) * 2.2, 30) if neck_angle > 28 else 0.0
+    s_ear = min((0.25 - ear_height_ratio) * 120, 30) if ear_height_ratio < 0.25 else 0.0
+    s_cva = min((cva_angle - 30) * 2.0, 35) if cva_angle > 30 else 0.0
+    s_nose = min((nose_drop - 0.08) * 120, 12) if nose_drop > 0.08 else 0.0
+    s_sh = min((shoulder_fwd_3d - 0.20) * 50, 15) if shoulder_fwd_3d > 0.20 else 0.0
 
     fhp_score = s_neck + s_ear + s_cva + s_nose + s_sh
     fhp_score = min(fhp_score, 100.0)
@@ -519,38 +606,72 @@ async def detect(request: DetectRequest):
         "total": round(fhp_score, 1)
     }
 
-    # Classification uses biomechanical scoring as PRIMARY 
-    # (ML model not yet calibrated for real webcam data distribution)
+    # Blend ML model prediction with biomechanical scoring.
+    # The ML model should only influence the result when it shows discrimination
+    # (i.e., not stuck at extremes like 0.00 or 1.00 for all frames).
+    # When stuck, fall back to bio-only scoring.
     bio_prob = fhp_score / 100.0
+
+    # Track ML prediction variance per session to detect a stuck model
+    if session_id not in _ml_pred_history:
+        _ml_pred_history[session_id] = deque(maxlen=30)
+    _ml_pred_history[session_id].append(ml_fhp_prob)
+
+    ml_is_active = abs(ml_fhp_prob - 0.5) > 0.01  # not placeholder
+    ml_is_discriminating = False
+    if ml_is_active and len(_ml_pred_history[session_id]) >= 10:
+        preds = list(_ml_pred_history[session_id])
+        ml_std = float(np.std(preds))
+        ml_mean = float(np.mean(preds))
+        # Model is discriminating if it shows variance OR isn't stuck at an extreme
+        ml_is_discriminating = ml_std > 0.05 or (0.1 < ml_mean < 0.9)
+
+    if ml_is_active and ml_is_discriminating:
+        # ML model shows meaningful signal — use weighted blend
+        blended_prob = 0.35 * ml_fhp_prob + 0.65 * bio_prob
+    else:
+        # ML model is placeholder or stuck — trust biomechanics fully
+        blended_prob = bio_prob
+    bio_prob = blended_prob
 
     # Temporal smoothing
     num_frames_smooth = 8
     if session_id not in sessions:
+        # Evict stale sessions to prevent memory leak
+        if len(sessions) >= MAX_SESSIONS:
+            now = time.time()
+            stale = [sid for sid, ts in session_timestamps.items()
+                     if now - ts > SESSION_TTL_SECONDS]
+            for sid in stale:
+                sessions.pop(sid, None)
+                session_timestamps.pop(sid, None)
+                session_filters.pop(sid, None)
+                session_frame_buffers.pop(sid, None)
+                _ml_pred_history.pop(sid, None)
         sessions[session_id] = deque(maxlen=num_frames_smooth)
+    session_timestamps[session_id] = time.time()
     sessions[session_id].append(bio_prob)
     smoothed_prob = sum(sessions[session_id]) / len(sessions[session_id])
 
-    is_fhp = smoothed_prob > 0.20  # 20% threshold for sensitivity
+    is_fhp = smoothed_prob > 0.40  # 40% threshold — less false positives
     classification = "FHP" if is_fhp else "Normal"
     confidence = round(smoothed_prob if is_fhp else (1 - smoothed_prob), 4)
     probabilities = {
         "Normal": round(1 - smoothed_prob, 4),
         "FHP": round(smoothed_prob, 4),
     }
-    severity = "severe" if smoothed_prob > 0.60 else "moderate" if smoothed_prob > 0.20 else "normal"
+    severity = "severe" if smoothed_prob > 0.70 else "moderate" if smoothed_prob > 0.40 else "normal"
 
-    # Debug logging — every 30th frame
+    # Debug logging -- every 30th frame
     _debug_cls = getattr(app.state, '_debug_cls_count', 0)
     app.state._debug_cls_count = _debug_cls + 1
     if _debug_cls % 30 == 0:
         view = "frontal" if is_mostly_frontal else "side" if is_mostly_side else "diagonal"
-        # Show individual component scores
-        s_neck = min((neck_angle - 35) * 1.2, 35) if neck_angle > 35 else 0
-        s_ear = min((0.20 - ear_height_ratio) * 150, 25) if ear_height_ratio < 0.20 else 0
-        s_cva = min((cva_angle - 30) * 0.8, 20) if cva_angle > 30 else 0
-        print(f"   [FHP] #{_debug_cls} {view} score={fhp_score:.0f} smooth={smoothed_prob:.2f} → {classification}")
-        print(f"         neck={neck_angle:.1f}°(+{s_neck:.0f}) ear_h={ear_height_ratio:.3f}(+{s_ear:.0f}) "
-              f"cva={cva_angle:.1f}°(+{s_cva:.0f}) nose={nose_drop:.3f} shfwd={shoulder_fwd_3d:.3f}")
+        ml_disc = "disc" if ml_is_discriminating else "stuck"
+        ml_status = f"ml={ml_fhp_prob:.2f}({ml_disc})" if ml_is_active else "ml=OFF"
+        print(f"   [FHP] #{_debug_cls} {view} bio={fhp_score:.0f} {ml_status} blend={smoothed_prob:.2f} -> {classification}")
+        print(f"         neck={neck_angle:.1f}(+{score_breakdown['neck']}) ear_h={ear_height_ratio:.3f}(+{score_breakdown['ear']}) "
+              f"cva={cva_angle:.1f}(+{score_breakdown['cva']}) nose={nose_drop:.3f}(+{score_breakdown['nose']}) shfwd={shoulder_fwd_3d:.3f}(+{score_breakdown['shoulder']})")
 
     # Angles for display
     angles = {
@@ -598,6 +719,10 @@ async def delete_session(session_id: str):
     """Delete a session buffer."""
     if session_id in sessions:
         del sessions[session_id]
+        session_timestamps.pop(session_id, None)
+        session_filters.pop(session_id, None)
+        session_frame_buffers.pop(session_id, None)
+        _ml_pred_history.pop(session_id, None)
         return {"deleted": True}
     raise HTTPException(status_code=404, detail="Session not found")
 
@@ -609,7 +734,7 @@ web_dir = PROJECT_ROOT / "web"
 if web_dir.exists():
     app.mount("/", StaticFiles(directory=str(web_dir), html=True), name="web")
 else:
-    print(f"⚠️ Warning: Frontend directory not found at {web_dir}")
+    print(f"[WARN] Warning: Frontend directory not found at {web_dir}")
 
 
 # ============================================================

@@ -83,7 +83,7 @@ class FHPDataset(Dataset):
 
         if not poses_path.exists():
             # Create dummy data for testing/development
-            print(f"⚠️  No data found at {poses_path}. Creating dummy dataset.")
+            print(f"[WARN] No data found at {poses_path}. Creating dummy dataset.")
             self._create_dummy_data()
             return
 

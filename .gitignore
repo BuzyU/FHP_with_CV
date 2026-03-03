@@ -14,7 +14,6 @@ env/
 .env/
 
 # ML artifacts
-*.pth
 *.onnx
 *.tflite
 *.pt
@@ -22,9 +21,12 @@ data/raw/
 data/processed/
 data/splits/
 models/checkpoints/
-models/exported/*.pth
 logs/
 *.h5
+
+# Model weights (large) — except deployed model
+*.pth
+!models/exported/stgcn_fhp.pth
 
 # IDE
 .vscode/

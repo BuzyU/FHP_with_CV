@@ -1,9 +1,10 @@
 # API-specific requirements (lighter than full requirements.txt)
 # Used by Dockerfile for Render deployment
+# NOTE: torch CPU installed via --extra-index-url in Dockerfile
 
 # Core
-torch==2.1.0
-numpy>=1.24.0
+torch>=2.1.0
+numpy>=1.24.0,<2.0.0
 scipy>=1.10.0
 pyyaml>=6.0
 

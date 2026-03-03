@@ -49,8 +49,8 @@ def stage_collect(config: dict, image_dir: Optional[str] = None):
 
     if not raw_dir.exists():
         raw_dir.mkdir(parents=True, exist_ok=True)
-        print(f"📁 Created data directory: {raw_dir}")
-        print(f"\n⚠️  No raw data found. Please add images to:")
+        print(f"[DIR] Created data directory: {raw_dir}")
+        print(f"\n[WARN] No raw data found. Please add images to:")
         print(f"   {raw_dir.absolute()}")
         print(f"\n   Supported formats: .jpg, .jpeg, .png, .bmp")
         print(f"   Tip: Organize into subfolders (e.g., raw/statefarm/, raw/youtube/)")
@@ -61,13 +61,13 @@ def stage_collect(config: dict, image_dir: Optional[str] = None):
     images = [f for f in raw_dir.rglob("*") if f.suffix.lower() in extensions]
     videos = [f for f in raw_dir.rglob("*") if f.suffix.lower() in {".mp4", ".avi", ".mov", ".mkv"}]
 
-    print(f"📊 Raw data stats:")
+    print(f"[DATA] Raw data stats:")
     print(f"   Images found: {len(images)}")
     print(f"   Videos found: {len(videos)}")
     print(f"   Location: {raw_dir.absolute()}")
 
     if len(images) == 0 and len(videos) == 0:
-        print(f"\n⚠️  No data found. Add images to: {raw_dir.absolute()}")
+        print(f"\n[WARN] No data found. Add images to: {raw_dir.absolute()}")
         return False
 
     return True
@@ -89,7 +89,7 @@ def stage_detect_2d(config: dict, image_dir: Optional[str] = None):
 
     if output_path.exists():
         existing = np.load(str(output_path))
-        print(f"⏭️  Found existing 2D keypoints: {existing.shape}")
+        print(f"[SKIP] Found existing 2D keypoints: {existing.shape}")
         resp = input("   Re-process? (y/N): ").strip().lower()
         if resp != "y":
             return True
@@ -104,7 +104,7 @@ def stage_detect_2d(config: dict, image_dir: Optional[str] = None):
         output_path=str(output_path),
     )
 
-    print(f"\n✅ 2D detection complete:")
+    print(f"\n[OK] 2D detection complete:")
     for k, v in summary.items():
         print(f"   {k}: {v}")
 
@@ -126,11 +126,11 @@ def stage_lift_3d(config: dict):
     kp_3d_path = processed_dir / "poses_3d.npy"
 
     if not kp_2d_path.exists():
-        print(f"❌ No 2D keypoints found at {kp_2d_path}. Run stage 'detect_2d' first.")
+        print(f"[ERR] No 2D keypoints found at {kp_2d_path}. Run stage 'detect_2d' first.")
         return False
 
     keypoints_2d = np.load(str(kp_2d_path))
-    print(f"📥 Loaded 2D keypoints: {keypoints_2d.shape}")
+    print(f"[LOAD] Loaded 2D keypoints: {keypoints_2d.shape}")
 
     lifter = VideoPose3DLifter(
         model_path=config["lifting"].get("model_path"),
@@ -153,7 +153,7 @@ def stage_lift_3d(config: dict):
     poses_3d = np.concatenate(all_3d, axis=0)
     np.save(str(kp_3d_path), poses_3d)
 
-    print(f"\n✅ 3D lifting complete: {poses_3d.shape}")
+    print(f"\n[OK] 3D lifting complete: {poses_3d.shape}")
     print(f"   Saved to: {kp_3d_path}")
 
     return True
@@ -174,12 +174,12 @@ def stage_preprocess(config: dict):
     poses_3d_path = processed_dir / "poses_3d.npy"
 
     if not poses_3d_path.exists():
-        print(f"❌ No 3D poses found. Run stage 'lift_3d' first.")
+        print(f"[ERR] No 3D poses found. Run stage 'lift_3d' first.")
         return False
 
     poses_3d = np.load(str(poses_3d_path))
     N = poses_3d.shape[0]
-    print(f"📥 Loaded {N} 3D poses")
+    print(f"[LOAD] Loaded {N} 3D poses")
 
     all_normalized = []
     all_features = []
@@ -205,7 +205,7 @@ def stage_preprocess(config: dict):
     np.save(str(processed_dir / "quality_scores.npy"), quality)
 
     # Quality report
-    print(f"\n✅ Preprocessing complete:")
+    print(f"\n[OK] Preprocessing complete:")
     print(f"   Normalized poses: {normalized.shape}")
     print(f"   Bio features: {features.shape}")
     print(f"   Feature names: {get_feature_names()}")
@@ -214,7 +214,7 @@ def stage_preprocess(config: dict):
 
     low_quality = (quality < 0.5).sum()
     if low_quality > 0:
-        print(f"   ⚠️  {low_quality} samples have low quality (<0.5)")
+        print(f"   [WARN] {low_quality} samples have low quality (<0.5)")
 
     return True
 
@@ -238,7 +238,7 @@ def stage_label(config: dict):
     if labels_path.exists():
         with open(labels_path) as f:
             existing = json.load(f)
-        print(f"📊 Existing labels: {len(existing)}")
+        print(f"[DATA] Existing labels: {len(existing)}")
         resp = input("   Launch labeling tool for remaining? (y/N): ").strip().lower()
         if resp != "y":
             return True
@@ -271,7 +271,7 @@ def stage_split(config: dict):
     labels_path = processed_dir / "labels.npy"
 
     if not poses_path.exists():
-        print(f"❌ No poses found at {poses_path}")
+        print(f"[ERR] No poses found at {poses_path}")
         return False
 
     if not labels_path.exists():
@@ -281,7 +281,7 @@ def stage_split(config: dict):
             from src.data.label_tools import export_labels_to_numpy
             export_labels_to_numpy(str(json_labels), str(processed_dir))
         else:
-            print(f"❌ No labels found. Run stage 'label' first.")
+            print(f"[ERR] No labels found. Run stage 'label' first.")
             return False
 
     train_ratio = config["training"]["train_split"]
@@ -297,7 +297,7 @@ def stage_split(config: dict):
         seed=seed,
     )
 
-    print(f"\n✅ Data splits saved to: {splits_dir}")
+    print(f"\n[OK] Data splits saved to: {splits_dir}")
     return True
 
 
@@ -320,22 +320,22 @@ def stage_verify(config: dict):
         if poses_ok and labels_ok:
             poses = np.load(str(split_dir / "poses_3d.npy"))
             labels = np.load(str(split_dir / "labels.npy"))
-            check = f"✅ {split}: {len(labels)} samples (Normal: {(labels == 0).sum()}, FHP: {(labels == 1).sum()})"
+            check = f"[OK] {split}: {len(labels)} samples (Normal: {(labels == 0).sum()}, FHP: {(labels == 1).sum()})"
             checks.append(True)
         else:
-            check = f"❌ {split}: Missing data"
+            check = f"[ERR] {split}: Missing data"
             checks.append(False)
 
         print(f"   {check}")
 
     guide_ok = Path("docs/labeling_guide.png").exists()
-    print(f"   {'✅' if guide_ok else '❌'} Labeling guide: {'found' if guide_ok else 'missing'}")
+    print(f"   {'[OK]' if guide_ok else '[ERR]'} Labeling guide: {'found' if guide_ok else 'missing'}")
 
     config_ok = Path("config.yaml").exists()
-    print(f"   {'✅' if config_ok else '❌'} Config: {'found' if config_ok else 'missing'}")
+    print(f"   {'[OK]' if config_ok else '[ERR]'} Config: {'found' if config_ok else 'missing'}")
 
     all_ok = all(checks) and guide_ok and config_ok
-    print(f"\n{'🎉 READY FOR TRAINING!' if all_ok else '⚠️  Some checks failed. Fix the issues above.'}")
+    print(f"\n{'[DONE] READY FOR TRAINING!' if all_ok else '[WARN] Some checks failed. Fix the issues above.'}")
 
     return all_ok
 
@@ -379,7 +379,7 @@ Stages:
 
     config = load_config(args.config)
 
-    print("🦴 FHP Detection Pipeline")
+    print("[PIPE] FHP Detection Pipeline")
     print(f"   Config: {args.config}")
     print(f"   Stage: {args.stage}")
 
@@ -395,7 +395,7 @@ Stages:
                 success = stage_fn(config)
 
             if not success:
-                print(f"\n❌ Pipeline stopped at stage '{stage_name}'")
+                print(f"\n[ERR] Pipeline stopped at stage '{stage_name}'")
                 break
     else:
         stage_fn = STAGES[args.stage]

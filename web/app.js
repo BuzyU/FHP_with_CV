@@ -1,5 +1,5 @@
 /**
- * FHP Detection — Web Frontend Application
+ * FHP Detection — Web Frontend
  *
  * Captures webcam frames, sends to FastAPI backend,
  * displays results with skeleton overlay and stats.
@@ -10,56 +10,51 @@
 // ============================================
 
 const CONFIG = {
-    // API endpoint — Render backend URL (change in production)
-    API_URL: window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-        ? 'http://localhost:8000'
-        : (window.API_URL || 'https://fhp-detection-api.onrender.com'),
+    API_URL: `${window.location.protocol}//${window.location.host}`,
 
-    // Detection settings
-    FRAME_INTERVAL_MS: 200,      // 5 FPS to API (throttle)
-    ALERT_COOLDOWN_MS: 8000,     // 8 seconds between alerts
-    ALERT_DURATION_MS: 2000,     // Alert shows for 2 seconds
-    TIMELINE_MAX_BARS: 80,       // Max bars in timeline
+    // Detection
+    MIN_FRAME_INTERVAL_MS: 33,
+    API_CAPTURE_WIDTH: 320,
+    API_CAPTURE_HEIGHT: 240,
+    JPEG_QUALITY: 0.55,
+    ALERT_COOLDOWN_MS: 8000,
+    ALERT_DURATION_MS: 2000,
+    TIMELINE_MAX_BARS: 80,
 
-    // Canvas drawing — ALL 33 MediaPipe landmarks for pixel-perfect overlay
-    // MediaPipe Pose Landmark indices:
+    // Skeleton overlay — MediaPipe landmark indices
     // 0=nose, 7=L_ear, 8=R_ear, 11=L_shoulder, 12=R_shoulder
     // 13=L_elbow, 14=R_elbow, 15=L_wrist, 16=R_wrist
-    // 23=L_hip, 24=R_hip
+    // 23=L_hip, 24=R_hip, 33=virtual NECK (computed by API)
 
-    // === FHP ASSESSMENT CHAIN (the core posture lines) ===
-    // These are the anatomical lines used for clinical FHP detection:
-    // Head → Ear Tragus → Neck → Shoulder → Hip
-    // Index 33 = virtual NECK point (midpoint of shoulders, computed by API)
+    // FHP assessment chain (head → neck → shoulders)
     FHP_LINES: [
-        [0, 7],    // Nose → Left Ear (head forward position)
-        [0, 8],    // Nose → Right Ear
-        [7, 33],   // Left Ear → Neck (upper neck alignment)
-        [8, 33],   // Right Ear → Neck
-        [33, 11],  // Neck → Left Shoulder
-        [33, 12],  // Neck → Right Shoulder
-        [11, 23],  // Left Shoulder → Left Hip (trunk alignment)
-        [12, 24],  // Right Shoulder → Right Hip
-    ],
-
-    // Regular skeleton connections
-    SKELETON_EDGES: [
+        [0, 7], [0, 8],       // Nose → Ears
+        [7, 33], [8, 33],     // Ears → Neck
+        [33, 11], [33, 12],   // Neck → Shoulders
         [11, 12],              // Shoulder line
-        [23, 24],              // Hip line
-        [11, 13], [13, 15],   // Left arm (shoulder → elbow → wrist)
-        [12, 14], [14, 16],   // Right arm
     ],
 
-    // Upper body joints to draw as dots
-    UPPER_BODY_JOINTS: [0, 7, 8, 33, 11, 12, 13, 14, 15, 16, 23, 24],
+    // Body skeleton (arms + torso)
+    BODY_LINES: [
+        [11, 13], [13, 15],   // Left arm
+        [12, 14], [14, 16],   // Right arm
+        [11, 23], [12, 24],   // Torso sides (shoulders → hips)
+        [23, 24],              // Hip line
+    ],
+
+    // Primary joints (FHP chain: nose, ears, neck, shoulders)
+    PRIMARY_JOINTS: [0, 7, 8, 33, 11, 12],
+    // Secondary joints (arms + hips)
+    SECONDARY_JOINTS: [13, 14, 15, 16, 23, 24],
+
     JOINT_COLORS: {
-        0: '#fbbf24',  // Nose (gold)
-        7: '#c084fc', 8: '#c084fc',   // Ears (purple)
-        33: '#ffffff',                 // Neck (white)
-        11: '#38bdf8', 12: '#38bdf8', // Shoulders (cyan)
-        13: '#818cf8', 14: '#818cf8', // Elbows (indigo)
-        15: '#a78bfa', 16: '#a78bfa', // Wrists (violet)
-        23: '#34d399', 24: '#34d399', // Hips (green)
+        0:  '#fbbf24',                    // Nose — amber
+        7:  '#c084fc', 8:  '#c084fc',    // Ears — purple
+        33: '#e2e8f0',                    // Neck — light
+        11: '#38bdf8', 12: '#38bdf8',    // Shoulders — cyan
+        13: '#818cf8', 14: '#818cf8',    // Elbows — indigo
+        15: '#a78bfa', 16: '#a78bfa',    // Wrists — violet
+        23: '#34d399', 24: '#34d399',    // Hips — green
     },
 };
 
@@ -67,27 +62,35 @@ const CONFIG = {
 // State
 // ============================================
 
-let state = {
+const state = {
     detecting: false,
     sessionId: null,
     stream: null,
-    intervalId: null,
+    detectionLoopRunning: false,
     cameraFacingMode: 'user',
 
-    // Stats
     startTime: null,
     totalFrames: 0,
     normalFrames: 0,
     fhpFrames: 0,
     lastAlertTime: 0,
     lastResult: null,
-    fpsHistory: [],
+    detectionFpsEma: 0,
     timeline: [],
+
+    smoothNormalPct: 50,
+    smoothFhpPct: 50,
+
+    fhpHistory: [],
+    FHP_HISTORY_MAX: 300,
+
+    // Capture dimensions (for skeleton scaling)
+    captureWidth: 640,
+    captureHeight: 480,
 };
 
-
 // ============================================
-// DOM Elements
+// DOM
 // ============================================
 
 const $ = (id) => document.getElementById(id);
@@ -121,58 +124,59 @@ async function startDetection() {
         webcam.srcObject = state.stream;
         await webcam.play();
 
-        // Set display canvas size to match video
         displayCanvas.width = webcam.videoWidth;
         displayCanvas.height = webcam.videoHeight;
 
-        // Set container aspect-ratio to match webcam
+        // Match container aspect-ratio to webcam
         const container = document.querySelector('.video-container');
         container.style.aspectRatio = `${webcam.videoWidth} / ${webcam.videoHeight}`;
 
-        // Start live video rendering loop (mirrored)
+        // Live video render loop (mirrored)
         function renderFrame() {
             if (!state.detecting) return;
+
             ctx.save();
             ctx.translate(displayCanvas.width, 0);
             ctx.scale(-1, 1);
             ctx.drawImage(webcam, 0, 0, displayCanvas.width, displayCanvas.height);
             ctx.restore();
 
-            // Redraw skeleton on top if we have a result
+            // Overlay skeleton
             if (state.lastResult && state.lastResult.detected) {
-                drawSkeletonOnCanvas(state.lastResult);
+                drawSkeleton(state.lastResult);
             }
             displayAnimFrame = requestAnimationFrame(renderFrame);
         }
 
         $('videoLoading').classList.add('hidden');
         $('statusDot').classList.add('active');
+        $('statusLabel').textContent = 'Live';
 
         state.detecting = true;
         state.startTime = Date.now();
         state.sessionId = crypto.randomUUID();
 
-        // Start video render + detection loop
         renderFrame();
-        state.intervalId = setInterval(captureAndDetect, CONFIG.FRAME_INTERVAL_MS);
-
-        // Start stats timer
-        updateStatsTimer();
+        state.detectionLoopRunning = true;
+        runDetectionLoop();
+        startStatsTimer();
 
     } catch (err) {
         console.error('Camera error:', err);
-        alert('Camera access denied. Please allow camera access and try again.');
+        alert('Camera access denied. Please allow camera and try again.');
         stopDetection();
     }
 }
 
 function stopDetection() {
     state.detecting = false;
+    state.detectionLoopRunning = false;
 
-    if (state.intervalId) {
-        clearInterval(state.intervalId);
-        state.intervalId = null;
+    if (_statsIntervalId) {
+        clearInterval(_statsIntervalId);
+        _statsIntervalId = null;
     }
+
     if (displayAnimFrame) {
         cancelAnimationFrame(displayAnimFrame);
         displayAnimFrame = null;
@@ -184,11 +188,11 @@ function stopDetection() {
     }
 
     $('statusDot').classList.remove('active');
+    $('statusLabel').textContent = 'Offline';
     $('detectionPanel').classList.add('hidden');
     $('hero').classList.remove('hidden');
     $('infoSection').classList.remove('hidden');
 
-    // Clear canvas
     ctx.clearRect(0, 0, displayCanvas.width, displayCanvas.height);
 }
 
@@ -206,41 +210,75 @@ function resetSession() {
     state.fhpFrames = 0;
     state.startTime = Date.now();
     state.timeline = [];
+    state.fhpHistory = [];
+    state.smoothNormalPct = 50;
+    state.smoothFhpPct = 50;
+    state.detectionFpsEma = 0;
     state.sessionId = crypto.randomUUID();
     $('postureTimeline').innerHTML = '';
+    drawFhpChart();
     updateStats();
 }
 
 // ============================================
-// Capture & Send Frame
+// Capture & Send
 // ============================================
+
+let _captureCanvas = null;
+let _captureCtx = null;
+
+function getCaptureCanvas() {
+    if (!_captureCanvas) {
+        _captureCanvas = document.createElement('canvas');
+        _captureCanvas.width = CONFIG.API_CAPTURE_WIDTH;
+        _captureCanvas.height = CONFIG.API_CAPTURE_HEIGHT;
+        _captureCtx = _captureCanvas.getContext('2d', { willReadFrequently: false });
+    }
+    return { canvas: _captureCanvas, ctx: _captureCtx };
+}
+
+async function runDetectionLoop() {
+    let lastLoopTime = performance.now();
+    while (state.detectionLoopRunning && state.detecting) {
+        const frameStart = performance.now();
+        await captureAndDetect();
+        const elapsed = performance.now() - frameStart;
+
+        const remaining = CONFIG.MIN_FRAME_INTERVAL_MS - elapsed;
+        if (remaining > 0) {
+            await new Promise(r => setTimeout(r, remaining));
+        }
+
+        const now = performance.now();
+        const cycleDt = now - lastLoopTime;
+        lastLoopTime = now;
+        if (cycleDt > 0) {
+            const instantFps = 1000 / cycleDt;
+            state.detectionFpsEma = state.detectionFpsEma === 0
+                ? instantFps
+                : state.detectionFpsEma * 0.9 + instantFps * 0.1;
+        }
+    }
+}
 
 async function captureAndDetect() {
     if (!state.detecting || webcam.readyState < 2) return;
 
-    const frameStart = performance.now();
+    const { canvas, ctx: capCtx } = getCaptureCanvas();
+    const cw = canvas.width;
+    const ch = canvas.height;
 
-    // Capture frame at webcam resolution (mirrored for selfie)
-    const vw = webcam.videoWidth || 640;
-    const vh = webcam.videoHeight || 480;
+    // Mirror capture (same as display)
+    capCtx.save();
+    capCtx.translate(cw, 0);
+    capCtx.scale(-1, 1);
+    capCtx.drawImage(webcam, 0, 0, cw, ch);
+    capCtx.restore();
 
-    const captureCanvas = document.createElement('canvas');
-    captureCanvas.width = vw;
-    captureCanvas.height = vh;
-    const captureCtx = captureCanvas.getContext('2d');
+    state.captureWidth = webcam.videoWidth || 640;
+    state.captureHeight = webcam.videoHeight || 480;
 
-    // MIRROR the capture — same as display
-    captureCtx.translate(vw, 0);
-    captureCtx.scale(-1, 1);
-    captureCtx.drawImage(webcam, 0, 0, vw, vh);
-    captureCtx.setTransform(1, 0, 0, 1, 0, 0);
-
-    // Store capture dimensions
-    state.captureWidth = vw;
-    state.captureHeight = vh;
-
-    // Convert to base64 JPEG
-    const dataUrl = captureCanvas.toDataURL('image/jpeg', 0.7);
+    const dataUrl = canvas.toDataURL('image/jpeg', CONFIG.JPEG_QUALITY);
 
     try {
         const response = await fetch(`${CONFIG.API_URL}/api/detect`, {
@@ -260,15 +298,9 @@ async function captureAndDetect() {
         const result = await response.json();
         state.lastResult = result;
 
-        // Update FPS
-        const elapsed = performance.now() - frameStart;
-        state.fpsHistory.push(1000 / elapsed);
-        if (state.fpsHistory.length > 30) state.fpsHistory.shift();
-
         updateResult(result);
         updateAngles(result);
         updateTechPanel(result);
-        // Skeleton is drawn in renderFrame loop
         updateStats();
         updateTimeline(result);
         checkAlert(result);
@@ -279,36 +311,207 @@ async function captureAndDetect() {
 }
 
 // ============================================
+// Skeleton Drawing
+// ============================================
+
+function drawSkeleton(result) {
+    if (!result.detected || !result.keypoints_2d) return;
+
+    const kps = result.keypoints_2d;
+    const canvasW = displayCanvas.width;
+    const canvasH = displayCanvas.height;
+
+    // Keypoints from API are in the capture resolution (320x240)
+    // with coordinates already in pixel space (x*w, y*h of capture).
+    // We need to scale to display canvas size.
+    const scaleX = canvasW / CONFIG.API_CAPTURE_WIDTH;
+    const scaleY = canvasH / CONFIG.API_CAPTURE_HEIGHT;
+
+    const isNormal = result.classification !== 'FHP';
+
+    // Margin: reject joints that are outside the visible canvas (bad MediaPipe guesses)
+    const margin = 10;
+
+    // Get scaled position for a landmark index, with bounds checking
+    const getPos = (idx) => {
+        if (idx < kps.length && kps[idx]) {
+            const x = kps[idx][0] * scaleX;
+            const y = kps[idx][1] * scaleY;
+            // Reject points clearly outside the visible frame
+            if (x < -margin || x > canvasW + margin || y < -margin || y > canvasH + margin) {
+                return null;
+            }
+            return [x, y];
+        }
+        return null;
+    };
+
+    // Compute shoulder span for plausibility checks on arms/hips
+    const lsh = getPos(11), rsh = getPos(12);
+    let shoulderSpan = 0;
+    if (lsh && rsh) {
+        shoulderSpan = Math.hypot(rsh[0] - lsh[0], rsh[1] - lsh[1]);
+    }
+    const midShoulderY = (lsh && rsh) ? (lsh[1] + rsh[1]) / 2 : canvasH * 0.4;
+
+    // Plausibility check: reject arm/hip keypoints that are too far from shoulders
+    // (MediaPipe guesses wildly when limbs are off-screen)
+    const getCheckedPos = (idx) => {
+        const pos = getPos(idx);
+        if (!pos || shoulderSpan === 0) return null;
+        const maxDist = shoulderSpan * 2.5;  // arm/hip can't be >2.5x shoulder width away
+        const ref = (idx === 23 || idx === 24) ? midShoulderY : null;
+        // For hips: must be BELOW shoulders
+        if ((idx === 23 || idx === 24) && pos[1] < midShoulderY - shoulderSpan * 0.3) return null;
+        // Distance check from nearest shoulder
+        const anchor = (idx === 13 || idx === 15 || idx === 23) ? lsh : rsh;
+        if (anchor) {
+            const d = Math.hypot(pos[0] - anchor[0], pos[1] - anchor[1]);
+            if (d > maxDist) return null;
+        }
+        return pos;
+    };
+
+    ctx.lineCap = 'round';
+    ctx.setLineDash([]);
+
+    // --- Body skeleton (arms + torso — drawn first, behind FHP lines) ---
+    const bodyColor = isNormal
+        ? 'rgba(34, 197, 94, 0.5)'
+        : 'rgba(239, 68, 68, 0.5)';
+    ctx.strokeStyle = bodyColor;
+    ctx.lineWidth = 1.8;
+
+    for (const [i, j] of CONFIG.BODY_LINES) {
+        // Use plausibility-checked positions for arm/hip joints
+        const p1 = [11, 12].includes(i) ? getPos(i) : getCheckedPos(i);
+        const p2 = [11, 12].includes(j) ? getPos(j) : getCheckedPos(j);
+        if (p1 && p2) {
+            ctx.beginPath();
+            ctx.moveTo(p1[0], p1[1]);
+            ctx.lineTo(p2[0], p2[1]);
+            ctx.stroke();
+        }
+    }
+
+    // --- FHP assessment lines (prominent, on top) ---
+    const fhpColor = isNormal
+        ? 'rgba(250, 204, 21, 0.85)'     // Gold
+        : 'rgba(251, 146, 60, 0.9)';      // Orange
+
+    for (const [i, j] of CONFIG.FHP_LINES) {
+        const p1 = getPos(i), p2 = getPos(j);
+        if (p1 && p2) {
+            const isShoulder = (i === 11 && j === 12);
+            ctx.strokeStyle = isShoulder
+                ? (isNormal ? 'rgba(56, 189, 248, 0.6)' : 'rgba(239, 68, 68, 0.6)')
+                : fhpColor;
+            ctx.lineWidth = isShoulder ? 2.0 : 2.5;
+            ctx.beginPath();
+            ctx.moveTo(p1[0], p1[1]);
+            ctx.lineTo(p2[0], p2[1]);
+            ctx.stroke();
+        }
+    }
+
+    // --- Primary joint dots (nose, ears, neck, shoulders) ---
+    for (const idx of CONFIG.PRIMARY_JOINTS) {
+        const pos = getPos(idx);
+        if (!pos) continue;
+        const [px, py] = pos;
+
+        ctx.beginPath();
+        ctx.arc(px, py, 5, 0, Math.PI * 2);
+        ctx.fillStyle = CONFIG.JOINT_COLORS[idx] || '#e2e8f0';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0,0,0,0.4)';
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+    }
+
+    // --- Secondary joint dots (elbows, wrists, hips — smaller, with plausibility check) ---
+    for (const idx of CONFIG.SECONDARY_JOINTS) {
+        const pos = getCheckedPos(idx);
+        if (!pos) continue;
+        const [px, py] = pos;
+
+        ctx.beginPath();
+        ctx.arc(px, py, 3.5, 0, Math.PI * 2);
+        ctx.fillStyle = CONFIG.JOINT_COLORS[idx] || (isNormal ? '#4ade80' : '#f87171');
+        ctx.globalAlpha = 0.7;
+        ctx.fill();
+        ctx.globalAlpha = 1.0;
+        ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+    }
+}
+
+// ============================================
 // UI Updates
 // ============================================
 
 function updateResult(result) {
     const classEl = $('resultClass');
-    const confFill = $('confidenceFill');
-    const confVal = $('confidenceValue');
-    const card = $('resultCard');
+    const probFillNormal = $('probFillNormal');
+    const probFillFHP = $('probFillFHP');
+    const probValNormal = $('probValNormal');
+    const probValFHP = $('probValFHP');
+    const severityBadge = $('severityBadge');
 
     if (!result.detected) {
-        classEl.textContent = 'No Person';
+        classEl.textContent = 'No Person Detected';
         classEl.className = 'result-class';
-        confFill.style.width = '0%';
-        confVal.textContent = '—';
+        probFillNormal.style.width = '0%';
+        probFillFHP.style.width = '0%';
+        probValNormal.textContent = '\u2014';
+        probValFHP.textContent = '\u2014';
+        severityBadge.textContent = '\u2014';
+        severityBadge.className = 'severity-badge';
         return;
     }
 
     const cls = result.classification;
-    const conf = result.confidence || 0;
+    const probs = result.probabilities || { Normal: 0.5, FHP: 0.5 };
+    const rawNormal = probs.Normal * 100;
+    const rawFhp = probs.FHP * 100;
 
-    classEl.textContent = cls === 'FHP' ? '⚠️ FHP Detected' : '✅ Good Posture';
-    classEl.className = `result-class ${cls === 'FHP' ? 'fhp' : 'normal'}`;
+    // EMA smooth probability bars
+    state.smoothNormalPct = state.smoothNormalPct * 0.7 + rawNormal * 0.3;
+    state.smoothFhpPct = state.smoothFhpPct * 0.7 + rawFhp * 0.3;
+    const normalPct = state.smoothNormalPct;
+    const fhpPct = state.smoothFhpPct;
 
-    confFill.style.width = `${conf * 100}%`;
-    confFill.style.background = cls === 'FHP'
-        ? 'linear-gradient(90deg, #f87171, #ef4444)'
-        : 'linear-gradient(90deg, #4ade80, #22c55e)';
-    confVal.textContent = `${(conf * 100).toFixed(1)}%`;
+    // FHP history for chart
+    if (state.startTime) {
+        const timeSec = (Date.now() - state.startTime) / 1000;
+        state.fhpHistory.push({ time: timeSec, fhpPct: rawFhp });
+        if (state.fhpHistory.length > state.FHP_HISTORY_MAX) state.fhpHistory.shift();
+        drawFhpChart();
+    }
 
-    // Update stats
+    // Classification label
+    if (cls === 'FHP') {
+        classEl.textContent = 'FHP Detected';
+        classEl.className = 'result-class fhp';
+    } else {
+        classEl.textContent = 'Good Posture';
+        classEl.className = 'result-class normal';
+    }
+
+    // Probability bars
+    probFillNormal.style.width = `${normalPct}%`;
+    probFillFHP.style.width = `${fhpPct}%`;
+    probValNormal.textContent = `${normalPct.toFixed(1)}%`;
+    probValFHP.textContent = `${fhpPct.toFixed(1)}%`;
+
+    // Severity
+    const severity = result.cva_severity || 'normal';
+    const labels = { normal: 'Normal', moderate: 'Moderate', severe: 'Severe' };
+    severityBadge.textContent = labels[severity] || severity;
+    severityBadge.className = `severity-badge severity-${severity}`;
+
+    // Frame counters
     state.totalFrames++;
     if (cls === 'FHP') state.fhpFrames++;
     else state.normalFrames++;
@@ -328,91 +531,18 @@ function updateAngles(result) {
 
     for (const [key, elemId] of Object.entries(mapping)) {
         const el = $(elemId);
-        if (el && result.angles[key] !== undefined) {
-            const val = result.angles[key];
-            el.textContent = `${val.toFixed(1)}°`;
+        if (!el || result.angles[key] === undefined) continue;
+        const val = result.angles[key];
+        el.textContent = `${val.toFixed(1)}\u00B0`;
 
-            // Color code based on severity
-            if (key === 'cva_proxy_angle') {
-                el.style.color = val < 44 ? '#ef4444' : val < 49 ? '#f59e0b' : '#22c55e';
-            }
-        }
-    }
-}
-
-function drawSkeletonOnCanvas(result) {
-    if (!result.detected || !result.keypoints_2d) return;
-
-    const kps = result.keypoints_2d;
-    // Coordinates are in capture canvas space = displayCanvas space (both = webcam resolution)
-    // No scaling needed since displayCanvas.width = webcam.videoWidth
-
-    const isNormal = result.classification !== 'FHP';
-
-    // Helper to get position (returns null if keypoint invisible)
-    const getPos = (idx) => {
-        if (idx < kps.length && kps[idx]) {
-            return [kps[idx][0], kps[idx][1]];
-        }
-        return null;
-    };
-
-    // 1. Draw FHP ASSESSMENT CHAIN (prominent, thicker)
-    const fhpColor = isNormal ? 'rgba(250, 204, 21, 0.9)' : 'rgba(251, 146, 60, 0.95)';
-    ctx.strokeStyle = fhpColor;
-    ctx.lineWidth = 3;
-    ctx.lineCap = 'round';
-    ctx.setLineDash([]);
-
-    for (const [i, j] of CONFIG.FHP_LINES) {
-        const p1 = getPos(i), p2 = getPos(j);
-        if (p1 && p2) {
-            ctx.beginPath();
-            ctx.moveTo(p1[0], p1[1]);
-            ctx.lineTo(p2[0], p2[1]);
-            ctx.stroke();
-        }
-    }
-
-    // 2. Draw regular skeleton edges (thinner)
-    const boneColor = isNormal ? 'rgba(34, 197, 94, 0.6)' : 'rgba(239, 68, 68, 0.6)';
-    ctx.strokeStyle = boneColor;
-    ctx.lineWidth = 2;
-
-    for (const [i, j] of CONFIG.SKELETON_EDGES) {
-        const p1 = getPos(i), p2 = getPos(j);
-        if (p1 && p2) {
-            ctx.beginPath();
-            ctx.moveTo(p1[0], p1[1]);
-            ctx.lineTo(p2[0], p2[1]);
-            ctx.stroke();
-        }
-    }
-
-    // 3. Draw joints
-    const fhpKeyJoints = new Set([0, 7, 8, 33, 11, 12]);
-    for (const idx of CONFIG.UPPER_BODY_JOINTS) {
-        const pos = getPos(idx);
-        if (pos) {
-            const [px, py] = pos;
-            const radius = fhpKeyJoints.has(idx) ? 6 : 4;
-
-            ctx.beginPath();
-            ctx.arc(px, py, radius, 0, Math.PI * 2);
-            ctx.fillStyle = CONFIG.JOINT_COLORS[idx] || (isNormal ? '#4ade80' : '#f87171');
-            ctx.fill();
-
-            ctx.beginPath();
-            ctx.arc(px, py, radius, 0, Math.PI * 2);
-            ctx.strokeStyle = 'rgba(255,255,255,0.7)';
-            ctx.lineWidth = 1.5;
-            ctx.stroke();
+        // Color code CVA
+        if (key === 'cva_proxy_angle') {
+            el.style.color = val > 49 ? '#22c55e' : val > 44 ? '#f59e0b' : '#ef4444';
         }
     }
 }
 
 function updateStats() {
-    // Duration
     if (state.startTime) {
         const elapsed = Math.floor((Date.now() - state.startTime) / 1000);
         const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
@@ -420,38 +550,37 @@ function updateStats() {
         $('statTime').textContent = `${mins}:${secs}`;
     }
 
-    // FPS
-    if (state.fpsHistory.length > 0) {
-        const avgFps = state.fpsHistory.reduce((a, b) => a + b) / state.fpsHistory.length;
-        $('statFPS').textContent = Math.round(avgFps);
+    if (state.detectionFpsEma > 0) {
+        $('statFPS').textContent = Math.round(state.detectionFpsEma);
     }
 
-    // Posture percentages
     const total = state.totalFrames || 1;
     $('statNormal').textContent = `${Math.round(state.normalFrames / total * 100)}%`;
     $('statFHP').textContent = `${Math.round(state.fhpFrames / total * 100)}%`;
 }
 
-function updateStatsTimer() {
-    setInterval(() => {
+let _statsIntervalId = null;
+function startStatsTimer() {
+    if (_statsIntervalId) clearInterval(_statsIntervalId);
+    _statsIntervalId = setInterval(() => {
         if (state.detecting) updateStats();
     }, 1000);
 }
 
 function updateTimeline(result) {
     if (!result.detected) return;
-
     const cls = result.classification === 'FHP' ? 'fhp' : 'normal';
     state.timeline.push(cls);
 
+    const container = $('postureTimeline');
     if (state.timeline.length > CONFIG.TIMELINE_MAX_BARS) {
         state.timeline.shift();
+        if (container.firstChild) container.removeChild(container.firstChild);
     }
 
-    const container = $('postureTimeline');
-    container.innerHTML = state.timeline
-        .map(c => `<div class="timeline-bar ${c}"></div>`)
-        .join('');
+    const bar = document.createElement('div');
+    bar.className = `timeline-bar ${cls}`;
+    container.appendChild(bar);
 }
 
 function checkAlert(result) {
@@ -460,15 +589,11 @@ function checkAlert(result) {
 
     const now = Date.now();
     if (now - state.lastAlertTime < CONFIG.ALERT_COOLDOWN_MS) return;
-
     state.lastAlertTime = now;
 
     const alertEl = $('alertOverlay');
     alertEl.classList.remove('hidden');
-
-    setTimeout(() => {
-        alertEl.classList.add('hidden');
-    }, CONFIG.ALERT_DURATION_MS);
+    setTimeout(() => alertEl.classList.add('hidden'), CONFIG.ALERT_DURATION_MS);
 }
 
 // ============================================
@@ -489,18 +614,15 @@ document.addEventListener('keydown', (e) => {
 
 function updateTechPanel(result) {
     if (!result.score_breakdown) return;
-
     const b = result.score_breakdown;
 
-    // Update widths (percentages of max possible)
-    $('scoreNeck').style.width = `${Math.min((b.neck / 35.0) * 100, 100)}%`;
-    $('scoreEar').style.width = `${Math.min((b.ear / 25.0) * 100, 100)}%`;
-    $('scoreCVA').style.width = `${Math.min((b.cva / 25.0) * 100, 100)}%`;
-    $('scoreNose').style.width = `${Math.min((b.nose / 10.0) * 100, 100)}%`;
-    $('scoreShoulder').style.width = `${Math.min((b.shoulder / 15.0) * 100, 100)}%`;
+    $('scoreNeck').style.width = `${Math.min((b.neck / 30) * 100, 100)}%`;
+    $('scoreEar').style.width = `${Math.min((b.ear / 25) * 100, 100)}%`;
+    $('scoreCVA').style.width = `${Math.min((b.cva / 25) * 100, 100)}%`;
+    $('scoreNose').style.width = `${Math.min((b.nose / 10) * 100, 100)}%`;
+    $('scoreShoulder').style.width = `${Math.min((b.shoulder / 10) * 100, 100)}%`;
     $('scoreTotal').style.width = `${Math.min(b.total, 100)}%`;
 
-    // Update text values
     $('scoreNeckVal').textContent = `+${b.neck.toFixed(1)}`;
     $('scoreEarVal').textContent = `+${b.ear.toFixed(1)}`;
     $('scoreCVAVal').textContent = `+${b.cva.toFixed(1)}`;
@@ -508,7 +630,6 @@ function updateTechPanel(result) {
     $('scoreShoulderVal').textContent = `+${b.shoulder.toFixed(1)}`;
     $('scoreTotalVal').textContent = b.total.toFixed(1);
 
-    // Update EMA smoothed value text
     if (result.probabilities && result.probabilities.FHP !== undefined) {
         $('smoothedVal').textContent = `val = ${(result.probabilities.FHP * 100).toFixed(1)}%`;
     }
@@ -521,25 +642,123 @@ function toggleTechPanel() {
     const btn = $('techToggle');
     if (techPanelOpen) {
         content.classList.remove('hidden');
-        btn.textContent = '▼';
+        btn.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
     } else {
         content.classList.add('hidden');
-        btn.textContent = '▶';
+        btn.innerHTML = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
     }
 }
 
 // ============================================
-// On Load
+// FHP Over-Time Chart
+// ============================================
+
+function drawFhpChart() {
+    const canvas = $('fhpChart');
+    if (!canvas) return;
+    const c = canvas.getContext('2d');
+    const W = canvas.width = canvas.parentElement.clientWidth || 300;
+    const H = canvas.height = 90;
+    const pad = { top: 8, right: 8, bottom: 16, left: 28 };
+    const plotW = W - pad.left - pad.right;
+    const plotH = H - pad.top - pad.bottom;
+
+    c.clearRect(0, 0, W, H);
+
+    // Background
+    c.fillStyle = 'rgba(0,0,0,0.2)';
+    c.beginPath();
+    if (c.roundRect) c.roundRect(0, 0, W, H, 4);
+    else c.rect(0, 0, W, H);
+    c.fill();
+
+    const data = state.fhpHistory;
+    if (data.length < 2) {
+        c.fillStyle = 'rgba(255,255,255,0.15)';
+        c.font = '10px Inter, system-ui, sans-serif';
+        c.textAlign = 'center';
+        c.fillText('Collecting data\u2026', W / 2, H / 2 + 3);
+        return;
+    }
+
+    // Threshold line @ 40%
+    const threshY = pad.top + plotH * (1 - 40 / 100);
+    c.strokeStyle = 'rgba(251, 191, 36, 0.2)';
+    c.setLineDash([3, 3]);
+    c.lineWidth = 1;
+    c.beginPath();
+    c.moveTo(pad.left, threshY);
+    c.lineTo(pad.left + plotW, threshY);
+    c.stroke();
+    c.setLineDash([]);
+
+    // Y-axis labels
+    c.fillStyle = 'rgba(255,255,255,0.25)';
+    c.font = '9px JetBrains Mono, monospace';
+    c.textAlign = 'right';
+    c.fillText('100%', pad.left - 4, pad.top + 7);
+    c.fillText('40%', pad.left - 4, threshY + 3);
+    c.fillText('0%', pad.left - 4, pad.top + plotH + 1);
+
+    const tMin = data[0].time;
+    const tMax = data[data.length - 1].time;
+    const tRange = Math.max(tMax - tMin, 1);
+
+    const toX = (t) => pad.left + ((t - tMin) / tRange) * plotW;
+    const toY = (v) => pad.top + plotH * (1 - v / 100);
+
+    // Gradient fill
+    const grad = c.createLinearGradient(0, pad.top, 0, pad.top + plotH);
+    grad.addColorStop(0, 'rgba(239, 68, 68, 0.2)');
+    grad.addColorStop(0.4, 'rgba(239, 68, 68, 0.05)');
+    grad.addColorStop(1, 'rgba(34, 197, 94, 0.01)');
+
+    c.beginPath();
+    c.moveTo(toX(data[0].time), pad.top + plotH);
+    for (const pt of data) c.lineTo(toX(pt.time), toY(pt.fhpPct));
+    c.lineTo(toX(data[data.length - 1].time), pad.top + plotH);
+    c.closePath();
+    c.fillStyle = grad;
+    c.fill();
+
+    // Line
+    c.beginPath();
+    c.moveTo(toX(data[0].time), toY(data[0].fhpPct));
+    for (let i = 1; i < data.length; i++) {
+        const prev = data[i - 1], curr = data[i];
+        const cpx = (toX(prev.time) + toX(curr.time)) / 2;
+        c.bezierCurveTo(cpx, toY(prev.fhpPct), cpx, toY(curr.fhpPct), toX(curr.time), toY(curr.fhpPct));
+    }
+    c.strokeStyle = '#f87171';
+    c.lineWidth = 1.5;
+    c.stroke();
+
+    // Endpoint dot
+    const last = data[data.length - 1];
+    c.beginPath();
+    c.arc(toX(last.time), toY(last.fhpPct), 3, 0, Math.PI * 2);
+    c.fillStyle = last.fhpPct > 40 ? '#ef4444' : '#4ade80';
+    c.fill();
+    c.strokeStyle = 'rgba(255,255,255,0.6)';
+    c.lineWidth = 1;
+    c.stroke();
+
+    // Time label
+    c.fillStyle = 'rgba(255,255,255,0.2)';
+    c.font = '8px JetBrains Mono, monospace';
+    c.textAlign = 'center';
+    const durSec = Math.round(tRange);
+    const label = durSec < 60 ? `${durSec}s` : `${Math.floor(durSec / 60)}m ${durSec % 60}s`;
+    c.fillText(label, pad.left + plotW / 2, H - 2);
+}
+
+// ============================================
+// Init
 // ============================================
 
 window.addEventListener('load', () => {
-    // Check API health
     fetch(`${CONFIG.API_URL}/health`)
         .then(r => r.json())
-        .then(data => {
-            console.log('API status:', data);
-        })
-        .catch(() => {
-            console.warn('API not reachable at', CONFIG.API_URL);
-        });
+        .then(data => console.log('API status:', data))
+        .catch(() => console.warn('API not reachable at', CONFIG.API_URL));
 });

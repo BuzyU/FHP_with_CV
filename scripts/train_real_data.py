@@ -229,7 +229,7 @@ def generate_training_dataset(
     os.makedirs(output_dir, exist_ok=True)
     np.random.seed(seed)
     
-    print(f"📊 Generating {num_samples} samples with {num_frames} frames each")
+    print(f"[DATA] Generating {num_samples} samples with {num_frames} frames each")
     print(f"   Output: {output_dir}")
     
     all_joints = []
@@ -312,7 +312,7 @@ def generate_training_dataset(
         fhp_count = np.sum(l == 1)
         print(f"   {split_name}: {len(l)} samples (Normal={normal_count}, FHP={fhp_count})")
     
-    print(f"\n✅ Dataset saved to {output_dir}")
+    print(f"\n[OK] Dataset saved to {output_dir}")
     return output_dir
 
 
@@ -337,10 +337,10 @@ def train_model(
         config = yaml.safe_load(f)
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"\n🚀 Training on: {device}")
+    print(f"\n[TRAIN] Training on: {device}")
     
     # Load data
-    print("📂 Loading data...")
+    print("[LOAD] Loading data...")
     train_joints = np.load(os.path.join(data_dir, "train", "joints.npy"))
     train_features = np.load(os.path.join(data_dir, "train", "features.npy"))
     train_labels = np.load(os.path.join(data_dir, "train", "labels.npy"))
@@ -479,7 +479,7 @@ def train_model(
     
     # Test evaluation
     print(f"\n{'='*60}")
-    print("📊 Test Set Evaluation")
+    print("[TEST] Test Set Evaluation")
     print(f"{'='*60}")
     
     model.eval()
@@ -524,7 +524,7 @@ def train_model(
     torch.save(model.state_dict(), export_path)
     
     model_size_mb = os.path.getsize(export_path) / (1024 * 1024)
-    print(f"\n✅ Model exported: {export_path} ({model_size_mb:.1f} MB)")
+    print(f"\n[OK] Model exported: {export_path} ({model_size_mb:.1f} MB)")
     print(f"   Best Val F1: {best_val_f1:.4f}")
     print(f"   Test F1:     {test_f1:.4f}")
     
@@ -591,12 +591,9 @@ if __name__ == "__main__":
     )
     
     print("\n" + "=" * 60)
-    print("🎉 TRAINING COMPLETE!")
+    print("[DONE] TRAINING COMPLETE!")
     print("=" * 60)
     print(f"   Test Accuracy: {report['test_accuracy']:.1%}")
     print(f"   Test F1:       {report['test_f1']:.4f}")
     print(f"   Model exported to: models/exported/stgcn_fhp.pth")
     print(f"   Restart the API server to use the new model!")
-"""
-    Real Data Training Pipeline for FHP Detection
-"""

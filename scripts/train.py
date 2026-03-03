@@ -251,7 +251,7 @@ def train(config: dict, args):
                 "val_metrics": val_metrics,
                 "config": config,
             }, str(ckpt_dir / "best_model.pth"))
-            print(f"  ✅ New best model (F1: {best_val_f1:.4f})")
+            print(f"  [BEST] New best model (F1: {best_val_f1:.4f})")
 
         # Periodic checkpoint
         if (epoch + 1) % 20 == 0:
@@ -264,7 +264,7 @@ def train(config: dict, args):
 
         # Early stopping
         if early_stopping.step(val_metrics["macro_f1"]):
-            print(f"\n⏹️  Early stopping at epoch {epoch + 1}")
+            print(f"\n[STOP] Early stopping at epoch {epoch + 1}")
             break
 
     # Final evaluation on test set
@@ -304,7 +304,7 @@ def train(config: dict, args):
     export_dir = Path(config["paths"]["model_exported"])
     export_dir.mkdir(parents=True, exist_ok=True)
     torch.save(model.state_dict(), str(export_dir / "stgcn_fhp.pth"))
-    print(f"\n✅ Model exported: {export_dir / 'stgcn_fhp.pth'}")
+    print(f"\n[OK] Model exported: {export_dir / 'stgcn_fhp.pth'}")
     print(f"   Best validation F1: {best_val_f1:.4f}")
     print(f"   Test accuracy: {test_metrics['accuracy']:.4f}")
     print(f"   Test F1 (macro): {test_metrics['macro_f1']:.4f}")

@@ -61,7 +61,7 @@ class FHPRealtimeApp:
         self._init_lifter()
         self._init_classifier(model_path)
 
-        print("✅ FHP Real-time App initialized")
+        print("[OK] FHP Real-time App initialized")
         print(f"   Device: {self.device}")
         print(f"   Camera: {self.config['realtime']['camera_id']}")
 
@@ -94,14 +94,14 @@ class FHPRealtimeApp:
         self.classifier = create_model(model_config)
 
         if model_path and Path(model_path).exists():
-            checkpoint = torch.load(model_path, map_location=self.device)
+            checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
             if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
                 self.classifier.load_state_dict(checkpoint["model_state_dict"])
             else:
                 self.classifier.load_state_dict(checkpoint)
-            print(f"✅ Loaded classifier from {model_path}")
+            print(f"[OK] Loaded classifier from {model_path}")
         else:
-            print("⚠️  No trained classifier loaded — using random weights (demo mode)")
+            print("[WARN] No trained classifier loaded -- using random weights (demo mode)")
 
         self.classifier.to(self.device)
         self.classifier.eval()
@@ -120,7 +120,7 @@ class FHPRealtimeApp:
         self.running = True
         self.session_stats["start_time"] = time.time()
 
-        print("\n🎥 Starting real-time FHP detection...")
+        print("\n[CAM] Starting real-time FHP detection...")
         print("   Press 'q' to quit, 'r' to reset stats, 's' for screenshot")
 
         while self.running and cap.isOpened():
@@ -382,7 +382,7 @@ class FHPRealtimeApp:
             "start_time": time.time(),
         }
         self.prediction_history.clear()
-        print("📊 Stats reset")
+        print("[STATS] Stats reset")
 
     def _save_screenshot(self, frame: np.ndarray):
         """Save current frame as screenshot."""
@@ -390,7 +390,7 @@ class FHPRealtimeApp:
         path = f"data/screenshots/screenshot_{ts}.png"
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         cv2.imwrite(path, frame)
-        print(f"📸 Screenshot saved: {path}")
+        print(f"[SCREENSHOT] Screenshot saved: {path}")
 
     def _print_session_summary(self):
         """Print session summary on exit."""
@@ -414,13 +414,13 @@ class FHPRealtimeApp:
             print(f"FHP detected:   {fhp_pct:.1f}%")
 
             if fhp_pct > 50:
-                print("\n⚠️  Warning: You spent more than half the session in FHP!")
+                print("\n[!] Warning: You spent more than half the session in FHP!")
                 print("   Consider taking breaks and doing neck stretches.")
             elif fhp_pct > 30:
-                print("\n💡 Tip: FHP was detected 30%+ of the time.")
+                print("\n[TIP] FHP was detected 30%+ of the time.")
                 print("   Try to be more conscious of your head position.")
             else:
-                print("\n✅ Great posture session! Keep it up!")
+                print("\n[OK] Great posture session! Keep it up!")
 
         print("=" * 50)
 

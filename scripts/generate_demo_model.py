@@ -42,9 +42,9 @@ def main():
     output_path = output_dir / "stgcn_fhp.pth"
 
     torch.save(model.state_dict(), str(output_path))
-    print(f"✅ Saved demo model to: {output_path}")
+    print(f"[OK] Saved demo model to: {output_path}")
     print(f"   File size: {output_path.stat().st_size / 1024:.1f} KB")
-    print(f"\n⚠️  This is a randomly initialized model (DEMO MODE).")
+    print(f"\n[WARN] This is a randomly initialized model (DEMO MODE).")
     print(f"   Train the model for real predictions:")
     print(f"   python scripts/train.py --config config.yaml")
 

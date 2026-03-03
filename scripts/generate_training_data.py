@@ -305,7 +305,7 @@ def main():
     print(f"\nSplitting data:")
     split_and_save(poses, labels, args.output)
 
-    print(f"\n✅ Data saved to {args.output}/")
+    print(f"\n[OK] Data saved to {args.output}/")
 
 
 if __name__ == "__main__":

@@ -6,19 +6,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FHP Detection — Real-time Posture Analysis</title>
     <meta name="description"
-        content="AI-powered Forward Head Posture detection using Computer Vision and Graph Convolutional Networks. Real-time webcam analysis with biomechanical angle tracking.">
+        content="AI-powered Forward Head Posture detection using Computer Vision and Graph Convolutional Networks.">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link
-        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap"
         rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/style.css">
     <link rel="icon"
-        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🦴</text></svg>">
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect rx='20' width='100' height='100' fill='%236366f1'/><path d='M50 20 Q50 45 50 55 M35 35 L50 30 L65 35 M40 70 L50 55 L60 70' stroke='white' stroke-width='6' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
 </head>
 
 <body>
-    <!-- Animated background -->
+    <!-- Subtle background -->
     <div class="bg-grid"></div>
     <div class="bg-glow bg-glow-1"></div>
     <div class="bg-glow bg-glow-2"></div>
@@ -27,7 +26,19 @@
     <header id="header">
         <div class="header-content">
             <div class="logo">
-                <span class="logo-icon">🦴</span>
+                <div class="logo-mark">
+                    <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+                        <rect rx="6" width="28" height="28" fill="url(#logoGrad)" />
+                        <path d="M14 6 Q14 12 14 16 M9 10 L14 8 L19 10 M11 21 L14 16 L17 21" stroke="white"
+                            stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" />
+                        <defs>
+                            <linearGradient id="logoGrad" x1="0" y1="0" x2="28" y2="28">
+                                <stop stop-color="#6366f1" />
+                                <stop offset="1" stop-color="#8b5cf6" />
+                            </linearGradient>
+                        </defs>
+                    </svg>
+                </div>
                 <div class="logo-text">
                     <h1>FHP Detection</h1>
                     <span class="logo-subtitle">AI-Powered Posture Analysis</span>
@@ -45,18 +56,24 @@
     <main id="app">
         <!-- Hero -->
         <section class="hero" id="hero">
+            <div class="hero-badge">Computer Vision + Deep Learning</div>
             <h2 class="hero-title">
                 <span class="gradient-text">Forward Head Posture</span><br>
-                Detection & Correction
+                Detection &amp; Analysis
             </h2>
             <p class="hero-desc">
-                Real-time posture analysis using Computer Vision, 3D Pose Estimation,
-                and Graph Convolutional Networks — no wearables needed.
+                Real-time posture analysis using 3D Pose Estimation and
+                Spatio-Temporal Graph Convolutional Networks. No wearables needed.
             </p>
             <button class="btn btn-primary btn-glow" id="startBtn" onclick="startDetection()">
-                <span class="btn-icon">📷</span>
-                Start Webcam Analysis
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                    <circle cx="12" cy="13" r="4" />
+                </svg>
+                Start Analysis
             </button>
+            <p class="hero-hint">Press <kbd>Space</kbd> to start &middot; <kbd>Esc</kbd> to stop</p>
         </section>
 
         <!-- Detection Panel -->
@@ -65,8 +82,18 @@
                 <!-- Video Feed -->
                 <div class="card card-video">
                     <div class="card-header">
-                        <span class="card-title">📹 Live Feed</span>
-                        <div class="status-dot" id="statusDot"></div>
+                        <span class="card-title">
+                            <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polygon points="23 7 16 12 23 17 23 7" />
+                                <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                            </svg>
+                            Live Feed
+                        </span>
+                        <div class="status-indicator">
+                            <div class="status-dot" id="statusDot"></div>
+                            <span class="status-text" id="statusLabel">Offline</span>
+                        </div>
                     </div>
                     <div class="video-container" id="videoContainer">
                         <video id="webcam" autoplay playsinline muted style="display:none"></video>
@@ -78,10 +105,20 @@
                     </div>
                     <div class="video-controls">
                         <button class="btn btn-sm btn-outline" onclick="toggleCamera()">
-                            🔄 Switch Camera
+                            <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <polyline points="23 4 23 10 17 10" />
+                                <polyline points="1 20 1 14 7 14" />
+                                <path
+                                    d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                            </svg>
+                            Switch Camera
                         </button>
                         <button class="btn btn-sm btn-danger" onclick="stopDetection()">
-                            ⏹ Stop
+                            <svg class="icon" width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                                <rect x="4" y="4" width="16" height="16" rx="2" />
+                            </svg>
+                            Stop
                         </button>
                     </div>
                 </div>
@@ -91,16 +128,39 @@
                     <!-- Classification Card -->
                     <div class="card card-result" id="resultCard">
                         <div class="card-header">
-                            <span class="card-title">🎯 Classification</span>
+                            <span class="card-title">
+                                <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                                    stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                    stroke-linejoin="round">
+                                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                                    <polyline points="22 4 12 14.01 9 11.01" />
+                                </svg>
+                                Classification
+                            </span>
                         </div>
                         <div class="result-display" id="resultDisplay">
-                            <div class="result-class" id="resultClass">—</div>
-                            <div class="confidence-bar-container">
-                                <div class="confidence-label">Confidence</div>
-                                <div class="confidence-track">
-                                    <div class="confidence-fill" id="confidenceFill"></div>
+                            <div class="result-class" id="resultClass">&mdash;</div>
+
+                            <div class="dual-prob-container">
+                                <div class="prob-row prob-row-normal">
+                                    <span class="prob-label">Good Posture</span>
+                                    <div class="prob-track">
+                                        <div class="prob-fill prob-fill-normal" id="probFillNormal"></div>
+                                    </div>
+                                    <span class="prob-value" id="probValNormal">&mdash;</span>
                                 </div>
-                                <div class="confidence-value" id="confidenceValue">—</div>
+                                <div class="prob-row prob-row-fhp">
+                                    <span class="prob-label">FHP</span>
+                                    <div class="prob-track">
+                                        <div class="prob-fill prob-fill-fhp" id="probFillFHP"></div>
+                                    </div>
+                                    <span class="prob-value" id="probValFHP">&mdash;</span>
+                                </div>
+                            </div>
+
+                            <div class="severity-row" id="severityRow">
+                                <span class="severity-label">Severity</span>
+                                <span class="severity-badge" id="severityBadge">&mdash;</span>
                             </div>
                         </div>
                     </div>
@@ -108,32 +168,40 @@
                     <!-- Biomechanical Angles -->
                     <div class="card card-angles">
                         <div class="card-header">
-                            <span class="card-title">📐 Biomechanics</span>
+                            <span class="card-title">
+                                <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                                    stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                    stroke-linejoin="round">
+                                    <path d="M2 20L2 8L14 20" />
+                                    <path d="M2 14Q6 14 8 17" />
+                                </svg>
+                                Biomechanics
+                            </span>
                         </div>
                         <div class="angles-grid" id="anglesGrid">
                             <div class="angle-item">
                                 <span class="angle-label">CVA Proxy</span>
-                                <span class="angle-value" id="angleCVA">—</span>
+                                <span class="angle-value" id="angleCVA">&mdash;</span>
                             </div>
                             <div class="angle-item">
                                 <span class="angle-label">Shoulder Round</span>
-                                <span class="angle-value" id="angleShoulder">—</span>
+                                <span class="angle-value" id="angleShoulder">&mdash;</span>
                             </div>
                             <div class="angle-item">
                                 <span class="angle-label">Head Tilt</span>
-                                <span class="angle-value" id="angleHeadTilt">—</span>
+                                <span class="angle-value" id="angleHeadTilt">&mdash;</span>
                             </div>
                             <div class="angle-item">
                                 <span class="angle-label">Neck Flexion</span>
-                                <span class="angle-value" id="angleNeckFlex">—</span>
+                                <span class="angle-value" id="angleNeckFlex">&mdash;</span>
                             </div>
                             <div class="angle-item">
                                 <span class="angle-label">Head Fwd</span>
-                                <span class="angle-value" id="angleHeadFwd">—</span>
+                                <span class="angle-value" id="angleHeadFwd">&mdash;</span>
                             </div>
                             <div class="angle-item">
                                 <span class="angle-label">Shoulder Sym</span>
-                                <span class="angle-value" id="angleSymmetry">—</span>
+                                <span class="angle-value" id="angleSymmetry">&mdash;</span>
                             </div>
                         </div>
                     </div>
@@ -141,7 +209,16 @@
                     <!-- Session Stats -->
                     <div class="card card-stats">
                         <div class="card-header">
-                            <span class="card-title">📊 Session</span>
+                            <span class="card-title">
+                                <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                                    stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                    stroke-linejoin="round">
+                                    <line x1="18" y1="20" x2="18" y2="10" />
+                                    <line x1="12" y1="20" x2="12" y2="4" />
+                                    <line x1="6" y1="20" x2="6" y2="14" />
+                                </svg>
+                                Session
+                            </span>
                             <button class="btn btn-xs btn-ghost" onclick="resetSession()">Reset</button>
                         </div>
                         <div class="stats-grid">
@@ -165,102 +242,107 @@
                         <div class="posture-timeline" id="postureTimeline"></div>
                     </div>
 
+                    <!-- FHP Over Time Chart -->
+                    <div class="card card-chart">
+                        <div class="card-header">
+                            <span class="card-title">
+                                <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                                    stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                    stroke-linejoin="round">
+                                    <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                                </svg>
+                                FHP Over Time
+                            </span>
+                        </div>
+                        <div class="chart-container">
+                            <canvas id="fhpChart"></canvas>
+                        </div>
+                    </div>
+
                     <!-- Technical Analysis -->
                     <div class="card card-tech">
                         <div class="card-header">
-                            <span class="card-title">🔬 Technical Analysis</span>
-                            <button class="btn btn-xs btn-ghost" id="techToggle" onclick="toggleTechPanel()">▼</button>
+                            <span class="card-title">
+                                <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                                    stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                    stroke-linejoin="round">
+                                    <circle cx="12" cy="12" r="3" />
+                                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 0 1 0 4h-.09c-.66.026-1.25.42-1.51 1z" />
+                                </svg>
+                                Technical Analysis
+                            </span>
+                            <button class="btn btn-xs btn-ghost" id="techToggle" onclick="toggleTechPanel()">
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                    stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                                    <polyline points="6 9 12 15 18 9" />
+                                </svg>
+                            </button>
                         </div>
                         <div class="tech-content" id="techContent">
-                            <!-- Scoring Breakdown -->
                             <div class="tech-section">
                                 <div class="tech-label">FHP Score Breakdown</div>
                                 <div class="score-bars" id="scoreBreakdown">
-                                    <div class="score-row">
-                                        <span class="score-name">Neck Angle</span>
-                                        <div class="score-bar-track">
-                                            <div class="score-bar-fill" id="scoreNeck"></div>
-                                        </div>
-                                        <span class="score-val" id="scoreNeckVal">0</span>
+                                    <div class="score-row"><span class="score-name">Neck Angle</span>
+                                        <div class="score-bar-track"><div class="score-bar-fill" id="scoreNeck"></div></div>
+                                        <span class="score-val" id="scoreNeckVal">+0.0</span>
                                     </div>
-                                    <div class="score-row">
-                                        <span class="score-name">Ear Height</span>
-                                        <div class="score-bar-track">
-                                            <div class="score-bar-fill" id="scoreEar"></div>
-                                        </div>
-                                        <span class="score-val" id="scoreEarVal">0</span>
+                                    <div class="score-row"><span class="score-name">Ear Height</span>
+                                        <div class="score-bar-track"><div class="score-bar-fill" id="scoreEar"></div></div>
+                                        <span class="score-val" id="scoreEarVal">+0.0</span>
                                     </div>
-                                    <div class="score-row">
-                                        <span class="score-name">CVA Angle</span>
-                                        <div class="score-bar-track">
-                                            <div class="score-bar-fill" id="scoreCVA"></div>
-                                        </div>
-                                        <span class="score-val" id="scoreCVAVal">0</span>
+                                    <div class="score-row"><span class="score-name">CVA Angle</span>
+                                        <div class="score-bar-track"><div class="score-bar-fill" id="scoreCVA"></div></div>
+                                        <span class="score-val" id="scoreCVAVal">+0.0</span>
                                     </div>
-                                    <div class="score-row">
-                                        <span class="score-name">Nose Drop</span>
-                                        <div class="score-bar-track">
-                                            <div class="score-bar-fill" id="scoreNose"></div>
-                                        </div>
-                                        <span class="score-val" id="scoreNoseVal">0</span>
+                                    <div class="score-row"><span class="score-name">Nose Drop</span>
+                                        <div class="score-bar-track"><div class="score-bar-fill" id="scoreNose"></div></div>
+                                        <span class="score-val" id="scoreNoseVal">+0.0</span>
                                     </div>
-                                    <div class="score-row">
-                                        <span class="score-name">Shoulder Fwd</span>
-                                        <div class="score-bar-track">
-                                            <div class="score-bar-fill" id="scoreShoulder"></div>
-                                        </div>
-                                        <span class="score-val" id="scoreShoulderVal">0</span>
+                                    <div class="score-row"><span class="score-name">Shoulder Fwd</span>
+                                        <div class="score-bar-track"><div class="score-bar-fill" id="scoreShoulder"></div></div>
+                                        <span class="score-val" id="scoreShoulderVal">+0.0</span>
                                     </div>
-                                    <div class="score-row score-total">
-                                        <span class="score-name">Total Score</span>
-                                        <div class="score-bar-track">
-                                            <div class="score-bar-fill score-bar-total" id="scoreTotal"></div>
-                                        </div>
+                                    <div class="score-row score-total"><span class="score-name">Total Score</span>
+                                        <div class="score-bar-track"><div class="score-bar-fill score-bar-total" id="scoreTotal"></div></div>
                                         <span class="score-val" id="scoreTotalVal">0</span>
                                     </div>
                                 </div>
                             </div>
-
-                            <!-- Filters & Formulas -->
                             <div class="tech-section">
-                                <div class="tech-label">Filters & Formulas</div>
+                                <div class="tech-label">Filters &amp; Formulas</div>
                                 <div class="formula-list">
-                                    <div class="formula-item">
-                                        <span class="formula-tag">EMA</span>
-                                        <code>S<sub>t</sub> = α·x<sub>t</sub> + (1−α)·S<sub>t−1</sub></code>
-                                        <span class="formula-param">α = 0.3</span>
+                                    <div class="formula-item"><span class="formula-tag">EMA</span>
+                                        <code>S<sub>t</sub> = &alpha;&middot;x<sub>t</sub> + (1&minus;&alpha;)&middot;S<sub>t&minus;1</sub></code>
+                                        <span class="formula-param">&alpha; = 0.3</span>
                                     </div>
-                                    <div class="formula-item">
-                                        <span class="formula-tag">CVA</span>
-                                        <code>θ = arccos(v̂<sub>ear→sh</sub> · ĵ)</code>
-                                        <span class="formula-param">thresh &gt; 20°</span>
+                                    <div class="formula-item"><span class="formula-tag">CVA</span>
+                                        <code>&theta; = arccos(v&#770;<sub>ear&rarr;sh</sub> &middot; &#309;)</code>
+                                        <span class="formula-param">thresh &gt; 20&deg;</span>
                                     </div>
-                                    <div class="formula-item">
-                                        <span class="formula-tag">Neck</span>
-                                        <code>θ = arccos(v̂<sub>hip→sh</sub> · v̂<sub>sh→ear</sub>)</code>
-                                        <span class="formula-param">thresh &gt; 15°</span>
+                                    <div class="formula-item"><span class="formula-tag">Neck</span>
+                                        <code>&theta; = arccos(v&#770;<sub>hip&rarr;sh</sub> &middot; v&#770;<sub>sh&rarr;ear</sub>)</code>
+                                        <span class="formula-param">thresh &gt; 15&deg;</span>
                                     </div>
-                                    <div class="formula-item">
-                                        <span class="formula-tag">Class</span>
-                                        <code>FHP if smoothed_score &gt; 20%</code>
-                                        <span class="formula-param" id="smoothedVal">—</span>
+                                    <div class="formula-item"><span class="formula-tag">Class</span>
+                                        <code>FHP if smoothed_score &gt; 40%</code>
+                                        <span class="formula-param" id="smoothedVal">&mdash;</span>
                                     </div>
                                 </div>
                             </div>
-
-                            <!-- Pipeline -->
                             <div class="tech-section">
                                 <div class="tech-label">Pipeline</div>
                                 <div class="pipeline-flow">
-                                    <span class="pipe-step">📷 Frame</span>
-                                    <span class="pipe-arrow">→</span>
-                                    <span class="pipe-step">🦴 MediaPipe</span>
-                                    <span class="pipe-arrow">→</span>
-                                    <span class="pipe-step">📐 3D Lift</span>
-                                    <span class="pipe-arrow">→</span>
-                                    <span class="pipe-step">🧮 Bio Score</span>
-                                    <span class="pipe-arrow">→</span>
-                                    <span class="pipe-step">🎯 EMA</span>
+                                    <span class="pipe-step">Frame</span>
+                                    <svg class="pipe-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                                    <span class="pipe-step">MediaPipe</span>
+                                    <svg class="pipe-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                                    <span class="pipe-step">3D Lift</span>
+                                    <svg class="pipe-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                                    <span class="pipe-step">ST-GCN</span>
+                                    <svg class="pipe-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                                    <span class="pipe-step">Bio Score</span>
+                                    <svg class="pipe-arrow" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+                                    <span class="pipe-step pipe-step-final">EMA</span>
                                 </div>
                             </div>
                         </div>
@@ -274,26 +356,54 @@
             <h3 class="section-title">How It Works</h3>
             <div class="info-grid">
                 <div class="info-card">
-                    <div class="info-icon">📷</div>
+                    <div class="info-icon">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--accent-secondary)"
+                            stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                            <circle cx="12" cy="13" r="4" />
+                        </svg>
+                    </div>
                     <h4>1. Capture</h4>
-                    <p>Your webcam captures video frames in real-time. All processing happens locally — no images are
-                        stored.</p>
+                    <p>Webcam captures video frames in real-time. All processing is local &mdash; no images leave your device.</p>
                 </div>
                 <div class="info-card">
-                    <div class="info-icon">🦴</div>
+                    <div class="info-icon">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--accent-secondary)"
+                            stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="5" r="3" />
+                            <line x1="12" y1="8" x2="12" y2="16" />
+                            <line x1="8" y1="11" x2="16" y2="11" />
+                            <line x1="8" y1="22" x2="12" y2="16" />
+                            <line x1="16" y1="22" x2="12" y2="16" />
+                        </svg>
+                    </div>
                     <h4>2. Pose Estimation</h4>
-                    <p>MediaPipe detects 17 body joints in 2D, then VideoPose3D lifts them to 3D coordinates.</p>
+                    <p>MediaPipe detects 33 body landmarks in 2D, then VideoPose3D lifts them to 3D coordinates.</p>
                 </div>
                 <div class="info-card">
-                    <div class="info-icon">🧠</div>
+                    <div class="info-icon">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--accent-secondary)"
+                            stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="6" cy="6" r="2" /><circle cx="18" cy="6" r="2" />
+                            <circle cx="6" cy="18" r="2" /><circle cx="18" cy="18" r="2" />
+                            <circle cx="12" cy="12" r="2" />
+                            <line x1="6" y1="6" x2="12" y2="12" /><line x1="18" y1="6" x2="12" y2="12" />
+                            <line x1="6" y1="18" x2="12" y2="12" /><line x1="18" y1="18" x2="12" y2="12" />
+                        </svg>
+                    </div>
                     <h4>3. GCN Analysis</h4>
-                    <p>A Graph Convolutional Network analyzes the 3D skeleton structure and temporal dynamics.</p>
+                    <p>A Spatio-Temporal Graph Convolutional Network analyzes the 3D skeleton across 30 temporal frames.</p>
                 </div>
                 <div class="info-card">
-                    <div class="info-icon">✅</div>
+                    <div class="info-icon">
+                        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--accent-secondary)"
+                            stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                            <polyline points="22 4 12 14.01 9 11.01" />
+                        </svg>
+                    </div>
                     <h4>4. Classification</h4>
-                    <p>The model classifies your posture as Normal or FHP with confidence scores and biomechanical
-                        angles.</p>
+                    <p>Classifies posture as Normal or FHP with confidence scores and biomechanical analysis.</p>
                 </div>
             </div>
         </section>
@@ -302,22 +412,27 @@
     <!-- Alert Overlay -->
     <div class="alert-overlay hidden" id="alertOverlay">
         <div class="alert-content">
-            <div class="alert-icon">⚠️</div>
-            <div class="alert-text">Correct Your Posture!</div>
-            <div class="alert-subtext">Your head is tilting forward</div>
+            <div class="alert-icon">
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                    <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
+            </div>
+            <div class="alert-text">Correct Your Posture</div>
+            <div class="alert-subtext">Forward head position detected</div>
         </div>
     </div>
 
     <!-- Footer -->
     <footer>
         <div class="footer-content">
-            <span>FHP Detection System v1.0</span>
-            <span class="footer-sep">•</span>
-            <span>Powered by ST-GCN + MediaPipe + VideoPose3D</span>
+            <span>FHP Detection v1.0</span>
+            <span class="footer-sep">&middot;</span>
+            <span>ST-GCN &middot; MediaPipe &middot; VideoPose3D</span>
         </div>
     </footer>
 
-    <script src="/static/app.js"></script>
+    <script src="/app.js"></script>
 </body>
 
 </html>

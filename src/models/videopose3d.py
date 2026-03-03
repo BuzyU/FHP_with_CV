@@ -204,14 +204,14 @@ class VideoPose3DLifter:
 
         # Load pretrained weights if available
         if model_path and Path(model_path).exists():
-            checkpoint = torch.load(model_path, map_location=self.device)
+            checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
             if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
                 self.model.load_state_dict(checkpoint["model_state_dict"])
             else:
                 self.model.load_state_dict(checkpoint)
-            print(f"✅ Loaded VideoPose3D weights from {model_path}")
+            print(f"[OK] Loaded VideoPose3D weights from {model_path}")
         else:
-            print("⚠️  Using randomly initialized VideoPose3D "
+            print("[WARN] Using randomly initialized VideoPose3D "
                   "(weights will be downloaded during training)")
 
         self.model.to(self.device)

@@ -1,0 +1,58 @@
+# Virtual environments
+.venv/
+venv/
+env/
+.env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+
+# Raw data (large, not needed at runtime)
+data/raw/
+data/processed/
+data/splits/
+data/real_splits/
+
+# Training checkpoints (only exported model needed)
+models/checkpoints/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Notebooks
+notebooks/
+.ipynb_checkpoints/
+
+# Tests & scripts (not needed in production)
+tests/
+scripts/
+docs/
+
+# Git
+.git/
+.gitignore
+
+# Logs
+logs/
+*.log
+
+# Docker meta
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+# Render / Vercel meta
+render.yaml
+vercel.json
+Procfile
+README.md
